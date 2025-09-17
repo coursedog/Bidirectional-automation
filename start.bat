@@ -50,7 +50,7 @@ if "%HAVEGIT%"=="0" (
       where git >nul 2>&1
       if not errorlevel 1 set HAVEGIT=1
       if "%HAVEGIT%"=="0" (
-        echo Git still not found in PATH (may require restarting terminal). Skipping auto-update.
+        echo Git still not found in PATH ^may require restarting terminal^. Skipping auto-update.
       )
     )
   )
