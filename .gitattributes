@@ -1,0 +1,3 @@
+# Ensure Unix line endings for shell scripts across platforms
+*.sh text eol=lf
+*.command text eol=lf
