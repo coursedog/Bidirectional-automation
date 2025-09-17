@@ -28,16 +28,41 @@ if errorlevel 1 (
     if errorlevel 1 (
       echo No 'origin' remote configured. Skipping auto-update.
     ) else (
-      REM Refresh index and check for a clean working tree
-      git update-index -q --refresh
-      git diff-index --quiet HEAD -- >nul 2>&1
-      if errorlevel 1 (
-        echo Local changes detected. Skipping auto-update to avoid merge conflicts.
+      REM Determine current branch
+      for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set BRANCH=%%b
+      if not defined BRANCH (
+        echo Unable to determine current branch. Skipping auto-update.
       ) else (
-        echo Updating project ^(git pull --ff-only^)...
-        git pull --ff-only
+        REM Refresh index and detect local changes (dirty working tree)
+        git update-index -q --refresh
+        git diff-index --quiet HEAD -- >nul 2>&1
         if errorlevel 1 (
-          echo git pull failed. Continuing without updating.
+          set DIRTY=1
+        ) else (
+          set DIRTY=0
+        )
+        REM Fetch remote and check if remote is ahead
+        git fetch --quiet 2>nul
+        for /f "delims=" %%c in ('git rev-list --count HEAD..origin/!BRANCH! 2^>nul') do set REMOTE_AHEAD=%%c
+        if not defined REMOTE_AHEAD set REMOTE_AHEAD=0
+        if not "!REMOTE_AHEAD!"=="0" (
+          if "!DIRTY!"=="1" (
+            echo A new version is available on origin/!BRANCH!, and local changes are detected.
+          ) else (
+            echo A new version is available on origin/!BRANCH!.
+          )
+          set /p UPDATE=Update now? y/n: 
+          if /I "!UPDATE!"=="Y" (
+            echo Updating project ^git pull --ff-only^...
+            git pull --ff-only
+            if errorlevel 1 (
+              echo git pull failed. Continuing without updating.
+            )
+          ) else (
+            echo Skipping update. Continuing with current local version.
+          )
+        ) else (
+          echo Project is up to date.
         )
       )
     )
