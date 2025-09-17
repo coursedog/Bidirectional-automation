@@ -15,27 +15,75 @@ rehash_path() {
   fi
 }
 
-# Ensure Homebrew is available (try to auto-install if missing)
-if ! command -v brew &> /dev/null; then
-  echo "ℹ️  Homebrew not found. Attempting to install Homebrew..."
-  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
-  rehash_path
-  if ! command -v brew &> /dev/null; then
-    echo "⚠️  Failed to install Homebrew automatically. Proceeding without Homebrew."
+# 1) Ensure Node.js is installed (prefer user-scoped nvm; fall back to Homebrew if available)
+if ! command -v node &> /dev/null; then
+    echo "❌ Node.js is not installed or not in PATH."
+    # nvm fallback (no sudo required)
+    export NVM_DIR="$HOME/.nvm"
+    mkdir -p "$NVM_DIR" >/dev/null 2>&1 || true
+    if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+      echo "Installing nvm (Node Version Manager) to $NVM_DIR ..."
+      curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash -s -- --no-use || true
+    fi
+    # shellcheck disable=SC1090
+    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+    if command -v nvm >/dev/null 2>&1; then
+      echo "Installing Node.js LTS via nvm..."
+      nvm install 18 >/dev/null 2>&1 || nvm install --lts >/dev/null 2>&1 || true
+      nvm use 18 >/dev/null 2>&1 || nvm use --lts >/dev/null 2>&1 || true
+      rehash_path
+    fi
+    if ! command -v node &> /dev/null; then
+      if command -v brew &> /dev/null; then
+        echo "Attempting to install Node.js via Homebrew..."
+        brew update >/dev/null 2>&1 || true
+        brew list node >/dev/null 2>&1 || brew install node || true
+        rehash_path
+      fi
+    fi
+    if ! command -v node &> /dev/null; then
+        echo "❌ Node.js still not available. Please install Node.js 18+ from https://nodejs.org/ (or install Homebrew from https://brew.sh and run 'brew install node')."
+        exit 1
+    fi
+fi
+
+# Check Node.js version
+NODE_VERSION=$(node --version)
+NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
+if [ "$NODE_MAJOR" -lt 18 ]; then
+    echo "❌ Node.js version $NODE_VERSION detected. This tool requires Node.js 18.0 or higher."
+    echo "Please update Node.js (nvm install 18, or Homebrew: brew upgrade node) and try again."
+    exit 1
+fi
+
+echo "✅ Node.js $NODE_VERSION detected"
+
+# 2) Handle Git presence (only mention Homebrew as a fallback; no auto-install of Homebrew)
+HAVE_GIT=1
+if ! command -v git &> /dev/null; then
+  HAVE_GIT=0
+  echo "ℹ️  Git not found."
+  if command -v brew &> /dev/null; then
+    echo "Attempting to install Git via Homebrew..."
+    brew update >/dev/null 2>&1 || true
+    brew list git >/dev/null 2>&1 || brew install git || true
+    rehash_path
+    command -v git >/dev/null 2>&1 && HAVE_GIT=1 || HAVE_GIT=0
   else
-    echo "✅ Homebrew installed successfully."
+    if ! xcode-select -p >/dev/null 2>&1; then
+      echo "📦 You can install Apple's Command Line Tools (includes git) with: xcode-select --install"
+    fi
+    echo "Or install Homebrew from https://brew.sh then run: brew install git"
   fi
 fi
 
-# Optional: Auto-update from Git if available
-if command -v git &> /dev/null; then
+# 3) Optional: Auto-update from Git if available
+if [ "$HAVE_GIT" = "1" ]; then
   if git rev-parse --is-inside-work-tree &> /dev/null; then
     if git remote get-url origin &> /dev/null; then
       # Determine current branch
       BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-      if [ -z "$BRANCH" ]; then
-        echo "ℹ️  Unable to determine current branch. Skipping auto-update."
-      else
+      if [ -n "$BRANCH" ]; then
         # Detect local changes (dirty working tree)
         if ! git diff-index --quiet HEAD -- 2>/dev/null; then
           DIRTY=1
@@ -45,7 +93,7 @@ if command -v git &> /dev/null; then
         # Fetch and check if remote is ahead
         git fetch --quiet 2>/dev/null || true
         REMOTE_AHEAD=$(git rev-list --count HEAD..origin/$BRANCH 2>/dev/null || echo 0)
-        if [ -z "$REMOTE_AHEAD" ]; then REMOTE_AHEAD=0; fi
+        [ -z "$REMOTE_AHEAD" ] && REMOTE_AHEAD=0
         if [ "$REMOTE_AHEAD" != "0" ]; then
           echo "🔔 A new version is available on origin/$BRANCH."
           read -p "Update now? (y/n): " UPDATE
@@ -70,12 +118,14 @@ if command -v git &> /dev/null; then
             echo "⏭️  Skipping update. Continuing with current local version."
           fi
         else
-          if [ "$DIRTY" = "1" ]; then
+          if [ "${DIRTY:-0}" = "1" ]; then
             echo "ℹ️  Local changes detected. No remote updates. Continuing with current local version."
           else
             echo "✅ Project is up to date."
           fi
         fi
+      else
+        echo "ℹ️  Unable to determine current branch. Skipping auto-update."
       fi
     else
       echo "ℹ️  No 'origin' remote configured. Skipping auto-update."
@@ -84,74 +134,8 @@ if command -v git &> /dev/null; then
     echo "ℹ️  Not a Git repository. Skipping auto-update."
   fi
 else
-  echo "ℹ️  Git not found."
-  if command -v brew &> /dev/null; then
-    echo "Attempting to install Git via Homebrew..."
-    brew update >/dev/null 2>&1 || true
-    if brew list git >/dev/null 2>&1 || brew install git; then
-      echo "✅ Git installed via Homebrew."
-      rehash_path
-    else
-      echo "⚠️  Failed to install Git via Homebrew."
-      if ! xcode-select -p >/dev/null 2>&1; then
-        echo "📦 You can install Apple's Command Line Tools (includes git) with: xcode-select --install"
-      fi
-    fi
-  else
-    if ! xcode-select -p >/dev/null 2>&1; then
-      echo "📦 You can install Apple's Command Line Tools (includes git) with: xcode-select --install"
-    fi
-    echo "Or install Homebrew first: https://brew.sh and then: brew install git"
-  fi
+  echo "ℹ️  Git not available; continuing without auto-update."
 fi
-
-# Ensure Node.js is installed (attempt Homebrew install if missing; else nvm fallback)
-if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed or not in PATH."
-    if command -v brew &> /dev/null; then
-        echo "Attempting to install Node.js via Homebrew..."
-        brew update >/dev/null 2>&1 || true
-        if brew list node >/dev/null 2>&1 || brew install node; then
-            echo "✅ Node.js installed via Homebrew."
-            rehash_path
-        else
-            echo "⚠️  Failed to install Node.js via Homebrew. Falling back to nvm (user install)."
-        fi
-    fi
-    if ! command -v node &> /dev/null; then
-        # nvm fallback (no sudo required)
-        export NVM_DIR="$HOME/.nvm"
-        mkdir -p "$NVM_DIR" >/dev/null 2>&1 || true
-        if [ ! -s "$NVM_DIR/nvm.sh" ]; then
-          echo "Installing nvm (Node Version Manager) to $NVM_DIR ..."
-          curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash -s -- --no-use || true
-        fi
-        # shellcheck disable=SC1090
-        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-        if command -v nvm >/dev/null 2>&1; then
-          echo "Installing Node.js LTS via nvm..."
-          nvm install 18 >/dev/null 2>&1 || nvm install --lts >/dev/null 2>&1 || true
-          nvm use 18 >/dev/null 2>&1 || nvm use --lts >/dev/null 2>&1 || true
-        else
-          echo "⚠️  Failed to set up nvm automatically. Please install Node.js 18+ from https://nodejs.org/"
-        fi
-    fi
-    if ! command -v node &> /dev/null; then
-        echo "❌ Node.js still not available. Please install Node.js 18+ (Homebrew: brew install node, or nvm)."
-        exit 1
-    fi
-fi
-
-# Check Node.js version
-NODE_VERSION=$(node --version)
-NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
-if [ "$NODE_MAJOR" -lt 18 ]; then
-    echo "❌ Node.js version $NODE_VERSION detected. This tool requires Node.js 18.0 or higher."
-    echo "Please update Node.js (Homebrew: brew upgrade node, or nvm install 18) and try again."
-    exit 1
-fi
-
-echo "✅ Node.js $NODE_VERSION detected"
 
 # Check if dependencies are installed at repo root (node_modules)
 if [ ! -d "node_modules" ]; then
@@ -183,6 +167,7 @@ if [ ! -f "main.js" ]; then
 fi
 
 echo "✅ Environment check passed"
+
 echo ""
 echo "🎯 Starting the automation tool..."
 echo ""
