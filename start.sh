@@ -1,7 +1,31 @@
 #!/bin/bash
 
+set -euo pipefail
+
 echo "🚀 Bi-directional Tests Automation Tool - Unix/Linux/macOS"
 echo "=========================================================="
+
+# Helper to refresh PATH for current shell after installs
+rehash_path() {
+  hash -r 2>/dev/null || true
+  if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$((/opt/homebrew/bin/brew --prefix)/bin/brew) shellenv" >/dev/null 2>&1 || true
+  elif [ -f /usr/local/bin/brew ]; then
+    eval "$((/usr/local/bin/brew --prefix)/bin/brew) shellenv" >/dev/null 2>&1 || true
+  fi
+}
+
+# Ensure Homebrew is available (try to auto-install if missing)
+if ! command -v brew &> /dev/null; then
+  echo "ℹ️  Homebrew not found. Attempting to install Homebrew..."
+  NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+  rehash_path
+  if ! command -v brew &> /dev/null; then
+    echo "⚠️  Failed to install Homebrew automatically. Proceeding without Homebrew."
+  else
+    echo "✅ Homebrew installed successfully."
+  fi
+fi
 
 # Optional: Auto-update from Git if available
 if command -v git &> /dev/null; then
@@ -19,15 +43,11 @@ if command -v git &> /dev/null; then
           DIRTY=0
         fi
         # Fetch and check if remote is ahead
-        git fetch --quiet 2>/dev/null
+        git fetch --quiet 2>/dev/null || true
         REMOTE_AHEAD=$(git rev-list --count HEAD..origin/$BRANCH 2>/dev/null || echo 0)
         if [ -z "$REMOTE_AHEAD" ]; then REMOTE_AHEAD=0; fi
         if [ "$REMOTE_AHEAD" != "0" ]; then
-          if [ "$DIRTY" = "1" ]; then
-            echo "🔔 A new version is available on origin/$BRANCH, and local changes are detected."
-          else
-            echo "🔔 A new version is available on origin/$BRANCH."
-          fi
+          echo "🔔 A new version is available on origin/$BRANCH."
           read -p "Update now? (y/n): " UPDATE
           if [[ "$UPDATE" =~ ^[Yy]$ ]]; then
             echo "🔄 Updating project (git pull --ff-only)..."
@@ -52,42 +72,42 @@ if command -v git &> /dev/null; then
     echo "ℹ️  Not a Git repository. Skipping auto-update."
   fi
 else
-  echo "ℹ️  Git not found. Attempting to install via Homebrew..."
+  echo "ℹ️  Git not found."
   if command -v brew &> /dev/null; then
-    brew update >/dev/null 2>&1
+    echo "Attempting to install Git via Homebrew..."
+    brew update >/dev/null 2>&1 || true
     if brew list git >/dev/null 2>&1 || brew install git; then
       echo "✅ Git installed via Homebrew."
-      hash -r
+      rehash_path
     else
       echo "⚠️  Failed to install Git via Homebrew."
+      if ! xcode-select -p >/dev/null 2>&1; then
+        echo "📦 You can install Apple's Command Line Tools (includes git) with: xcode-select --install"
+      fi
     fi
   else
-    echo "ℹ️  Homebrew not found."
-    # Check if Xcode Command Line Tools are installed
     if ! xcode-select -p >/dev/null 2>&1; then
       echo "📦 You can install Apple's Command Line Tools (includes git) with: xcode-select --install"
-      echo "   Or install Homebrew first: https://brew.sh and then: brew install git"
-    else
-      echo "ℹ️  Command Line Tools present, but git not found in PATH. Consider reinstalling git via Homebrew."
     fi
+    echo "Or install Homebrew first: https://brew.sh and then: brew install git"
   fi
 fi
 
-# Check if Node.js is installed (attempt Homebrew install if missing)
+# Ensure Node.js is installed (attempt Homebrew install if missing)
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed or not in PATH. Attempting Homebrew install..."
+    echo "❌ Node.js is not installed or not in PATH."
     if command -v brew &> /dev/null; then
-        brew update >/dev/null 2>&1
-        # Install current Node (>=18 is acceptable for this tool)
+        echo "Attempting to install Node.js via Homebrew..."
+        brew update >/dev/null 2>&1 || true
         if brew list node >/dev/null 2>&1 || brew install node; then
             echo "✅ Node.js installed via Homebrew."
-            hash -r
+            rehash_path
         else
             echo "⚠️  Failed to install Node.js via Homebrew. Please install from https://nodejs.org/"
             exit 1
         fi
     else
-        echo "ℹ️  Homebrew not found. Please install Node.js 18+ from https://nodejs.org/"
+        echo "ℹ️  Homebrew not available. Please install Node.js 18+ from https://nodejs.org/"
         exit 1
     fi
 fi
