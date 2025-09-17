@@ -3,6 +3,29 @@
 echo "🚀 Bi-directional Tests Automation Tool - Unix/Linux/macOS"
 echo "=========================================================="
 
+# Optional: Auto-update from Git if available
+if command -v git &> /dev/null; then
+  if git rev-parse --is-inside-work-tree &> /dev/null; then
+    if git remote get-url origin &> /dev/null; then
+      if [ -z "$(git status --porcelain)" ]; then
+        echo "🔄 Updating project (git pull --ff-only)..."
+        if ! git pull --ff-only; then
+          echo "⚠️  git pull failed. Continuing without updating."
+        fi
+      else
+        echo "⚠️  Local changes detected. Skipping auto-update to avoid merge conflicts."
+      fi
+    else
+      echo "ℹ️  No 'origin' remote configured. Skipping auto-update."
+    fi
+  else
+    echo "ℹ️  Not a Git repository. Skipping auto-update."
+  fi
+else
+  echo "ℹ️  Git not found. Skipping auto-update."
+  echo "   Install Git to enable auto-update: https://git-scm.com/downloads/mac"
+fi
+
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
     echo "❌ Node.js is not installed or not in PATH"

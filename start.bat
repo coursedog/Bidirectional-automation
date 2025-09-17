@@ -13,6 +13,35 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM Optional: Auto-update from Git if available
+where git >nul 2>&1
+if errorlevel 1 (
+  echo Git not found in PATH. Skipping auto-update.
+  echo Install Git to enable auto-update: https://git-scm.com/downloads/win
+  echo Or via winget: winget install --id Git.Git -e --source winget
+) else (
+  git rev-parse --is-inside-work-tree >nul 2>&1
+  if errorlevel 1 (
+    echo Not a Git repository. Skipping auto-update.
+  ) else (
+    git remote get-url origin >nul 2>&1
+    if errorlevel 1 (
+      echo No 'origin' remote configured. Skipping auto-update.
+    ) else (
+      for /f %%i in ('git status --porcelain ^| find /c /v ""') do set CHANGES=%%i
+      if not "%CHANGES%"=="0" (
+        echo Local changes detected. Skipping auto-update to avoid merge conflicts.
+      ) else (
+        echo Updating project (git pull --ff-only)...
+        git pull --ff-only
+        if errorlevel 1 (
+          echo git pull failed. Continuing without updating.
+        )
+      )
+    )
+  )
+)
+
 REM Install deps at root if missing
 if not exist "node_modules" (
   echo Installing dependencies...
