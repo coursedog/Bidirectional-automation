@@ -17,6 +17,20 @@ rehash_path() {
 
 # 1) Ensure Node.js is installed (prefer user-scoped nvm; fall back to Homebrew if available)
 
+# Add common brew paths to PATH for this session (helps double-click launches)
+if [ -d /opt/homebrew/bin ] && ! echo ":$PATH:" | grep -q ":/opt/homebrew/bin:"; then
+  export PATH="/opt/homebrew/bin:$PATH"
+fi
+if [ -d /usr/local/bin ] && ! echo ":$PATH:" | grep -q ":/usr/local/bin:"; then
+  export PATH="/usr/local/bin:$PATH"
+fi
+
+# Pre-load nvm if present so node from nvm is visible in PATH
+export NVM_DIR="$HOME/.nvm"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
+fi
+
 if command -v node &> /dev/null; then
     NODE_VERSION=$(node --version)
     NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
@@ -27,16 +41,13 @@ if command -v node &> /dev/null; then
     fi
     echo "✅ Node.js $NODE_VERSION detected"
 else
-    echo "❌ Node.js is not installed or not in PATH."
-    # nvm fallback (no sudo required)
-    export NVM_DIR="$HOME/.nvm"
+    # Try to install via nvm (user-scoped, no sudo)
     mkdir -p "$NVM_DIR" >/dev/null 2>&1 || true
     if [ ! -s "$NVM_DIR/nvm.sh" ]; then
       echo "Installing nvm (Node Version Manager) to $NVM_DIR ..."
       curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash -s -- --no-use || true
+      [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" >/dev/null 2>&1
     fi
-    # shellcheck disable=SC1090
-    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
     if command -v nvm >/dev/null 2>&1; then
       echo "Installing Node.js LTS via nvm..."
       nvm install 18 >/dev/null 2>&1 || nvm install --lts >/dev/null 2>&1 || true
@@ -52,7 +63,7 @@ else
       fi
     fi
     if ! command -v node &> /dev/null; then
-        echo "❌ Node.js still not available. Please install Node.js 18+ from https://nodejs.org/ (or install Homebrew from https://brew.sh and run 'brew install node')."
+        echo "❌ Node.js is not installed or not in PATH. Please install Node.js 18+ from https://nodejs.org/ (or install Homebrew from https://brew.sh and run 'brew install node')."
         exit 1
     fi
     NODE_VERSION=$(node --version)
