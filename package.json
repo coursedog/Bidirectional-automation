@@ -2,13 +2,12 @@
   "name": "bi-tester",
   "version": "1.0.0",
   "description": "Bi-directional Tests Automation Tool for Coursedog's Academic Scheduling and Curriculum Management products",
-  "main": "index.js",
-  "bin": "index.js",
+  "main": "main.js",
+  "bin": "main.js",
   "scripts": {
-    "start": "node index.js",
-    "install": "node install_dependencies.js",
+    "start": "node main.js",
     "install-browsers": "npx playwright install",
-    "run": "node index.js"
+    "run": "node main.js"
   },
   "keywords": ["automation", "testing", "coursedog", "playwright", "bi-directional"],
   "author": "",

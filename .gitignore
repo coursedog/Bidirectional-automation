@@ -137,3 +137,20 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# --- Project-specific ignores ---
+# Debug videos: ignore contents; keep folder with .gitkeep if needed
+src/debug-videos/**
+!src/debug-videos/.gitkeep
+
+# Resources exports/templates: ignore contents; keep folder with .gitkeep if needed
+src/Resources/**
+!src/Resources/.gitkeep
+
+# Per-school run artifacts centralized under src/schools
+src/schools/**
+!src/schools/.gitkeep
+
+# Local session credentials
+src/session.json
+src/creds.json

@@ -21,7 +21,7 @@ fi
 
 echo "✅ Node.js $NODE_VERSION detected"
 
-# Check if dependencies are installed
+# Check if dependencies are installed at repo root (node_modules)
 if [ ! -d "node_modules" ]; then
     echo "❌ Dependencies not found."
     echo ""
@@ -29,7 +29,7 @@ if [ ! -d "node_modules" ]; then
     if [[ $install_choice =~ ^[Yy]$ ]]; then
         echo ""
         echo "📦 Installing dependencies..."
-        node install_dependencies.js
+        node src/install_dependencies.js
         if [ $? -ne 0 ]; then
             echo "❌ Failed to install dependencies."
             exit 1
@@ -39,14 +39,14 @@ if [ ! -d "node_modules" ]; then
         echo ""
     else
         echo ""
-        echo "Please run 'node install_dependencies.js' manually and try again."
+        echo "Please run 'node src/install_dependencies.js' manually and try again."
         exit 1
     fi
 fi
 
-# Check if index.js exists
-if [ ! -f "index.js" ]; then
-    echo "❌ index.js not found. Please run this script from the project root directory."
+# Check if main.js exists
+if [ ! -f "main.js" ]; then
+    echo "❌ main.js not found. Please run this script from the project root directory."
     exit 1
 fi
 
@@ -56,7 +56,7 @@ echo "🎯 Starting the automation tool..."
 echo ""
 
 # Run the main application
-node index.js
+node main.js
 
 # Check exit status
 if [ $? -ne 0 ]; then

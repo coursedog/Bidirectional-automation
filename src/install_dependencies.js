@@ -64,16 +64,16 @@ exec("npm install", (error, stdout, stderr) => {
         
         console.log("\n🎉 Installation completed successfully!");
         console.log("\nNext steps:");
-        console.log("1. Run 'node index.js' or 'npm start' to begin");
+        console.log("1. Run 'node main.js' or 'npm start' from the repo root to begin");
         console.log("2. Follow the prompts to configure your test");
-        console.log("3. Check the README.txt file for detailed instructions");
+        console.log("3. Check the README.md file for detailed instructions");
       });
     } else {
       console.log("\n🎉 Installation completed successfully!");
       console.log("\nNext steps:");
-      console.log("1. Run 'node index.js' or 'npm start' to begin");
+      console.log("1. Run 'node main.js' or 'npm start' from the repo root to begin");
       console.log("2. Follow the prompts to configure your test");
-      console.log("3. Check the README.txt file for detailed instructions");
+      console.log("3. Check the README.md file for detailed instructions");
     }
   });
 }); 

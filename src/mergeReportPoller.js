@@ -452,9 +452,18 @@ async function getAuthToken(env, schoolId) {
       'Connection': 'keep-alive'
     };
   
+    // Load credentials from creds.json
+    let creds = { email: '', password: '' };
+    try {
+      const credsPath = path.join(__dirname, 'creds.json');
+      if (fs.existsSync(credsPath)) {
+        creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+      }
+    } catch (_) {}
+
     const body = {
-      email: "dataengineers@coursedog.com",
-      password: "@&theNewD0g1nT0wn"
+      email: creds.email,
+      password: creds.password
     };
   
     try {

@@ -22,9 +22,9 @@ global.sessionUsedCourses = new Set();
 // Enrollment=0 filter query for sections dashboard
 //const filterQuery = `?columns[0]=course.code&columns[1]=sectionNumber&columns[2]=callNumber&columns[3]=sectionName&columns[4]=course.departments&columns[5]=enrollment&columns[6]=statusCode&filter.condition=and&filter.filters[0].customField=false&filter.filters[0].group=section&filter.filters[0].id=enrollment-section&filter.filters[0].inputType=number&filter.filters[0].name=enrollment&filter.filters[0].type=is&filter.filters[0].value=0&filter.filters[1].customField=false&filter.filters[1].group=section&filter.filters[1].id=statusCode-section&filter.filters[1].inputType=select&filter.filters[1].name=statusCode&filter.filters[1].type=is&filter.filters[1].value=A`;
 
-// Utility to ensure schoolId folder exists and return its path
+// Utility to ensure schoolId folder exists under src/schools and return its path
 async function ensureSchoolFolder(schoolId) {
-  const folderPath = path.join(__dirname, schoolId);
+  const folderPath = path.join(__dirname, 'schools', schoolId);
   if (!fs.existsSync(folderPath)) {
     fs.mkdirSync(folderPath, { recursive: true });
   }

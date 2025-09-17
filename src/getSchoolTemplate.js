@@ -2,6 +2,15 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+// Load credentials from creds.json
+let creds = { email: '', password: '', notion_api_key: '' };
+try {
+  const credsPath = path.join(__dirname, 'creds.json');
+  if (fs.existsSync(credsPath)) {
+    creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+  }
+} catch (_) {}
+
 /**
  * Fetches section template from API and saves to Resources folder
  * @param {string} token - Bearer token from authentication
@@ -155,8 +164,8 @@ async function getSchoolTemplate(env, schoolId) {
   };
 
   const body = {
-    email: "dataengineers@coursedog.com",
-    password: "@&theNewD0g1nT0wn"
+    email: creds.email,
+    password: creds.password
   };
 
   try {
