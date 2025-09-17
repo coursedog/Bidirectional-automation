@@ -62,7 +62,11 @@ if errorlevel 1 (
             echo Skipping update. Continuing with current local version.
           )
         ) else (
-          echo Project is up to date.
+          if "!DIRTY!"=="1" (
+            echo Local changes detected. No remote updates. Continuing with current local version.
+          ) else (
+            echo Project is up to date.
+          )
         )
       )
     )

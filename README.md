@@ -47,7 +47,7 @@ This tool automates the process of doing bi-directional testing: creating and up
         > 
         </aside>
         
-- Git (optional): Required only if you want the start scripts to auto-update the project with `git pull --ff-only` on launch.
+- Git: Required if you want the start scripts to auto-update the project with `git pull --ff-only` on launch.
   - Windows: see Git for Windows downloads [`git-scm.com/downloads/win`](https://git-scm.com/downloads/win)
   - macOS: see Git for macOS options [`git-scm.com/downloads/mac`](https://git-scm.com/downloads/mac)
 
