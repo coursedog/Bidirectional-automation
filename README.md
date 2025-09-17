@@ -1,10 +1,10 @@
 # ⚙️ Bi‑directional Tests Automation Tool
 
-## Instroduction
+## Introduction
 
 A cross‑platform CLI that automates bi‑directional testing in Coursedog for Academic Scheduling and Curriculum Management. It signs in, seeds session context, performs create/update actions, captures screenshots, polls merge reports, and writes organized summaries.
 
-## 🚧 Important Notice: Early Access: 
+## 🚧 Early Access
 
 This tool is actively evolving and may not work for every SIS. Validate results before relying on them for production. For help or enhancements, see: [Bi-di tester enhancement requests](https://www.notion.so/249f804589d180d0af82fea734eaf054?pvs=25)
 
@@ -32,14 +32,13 @@ This tool is actively evolving and may not work for every SIS. Validate results 
 - For Curriculum Management: You MUST create a new form named 'Propose New Course' that uses the same Course Template and that is linked to an auto-approval workflow.
 - Do not log in to Coursedog while the application is running.
     - When the automation starts, it will log in to Coursedog with the provided user account and password. Logging into Coursedog in another browser will log your user off from the automation.
-        - After completing bi-directional testing, be sure to:
-            - Open the relevant merge reports.
+         - After completing bi-directional testing, open the relevant merge reports.
             - Open each affected entity (e.g., course, section, instructor) after the merge to:
                 - Take screenshots.
                 - Review and troubleshoot as needed.
         - Note: Only open the merge report URL after the application has finished running all tests (when applicable), to avoid being logged out of the app.
     💡
-    Alternatively, you can create a second user using plus addressing. For example, register a new user like rniffa+seconduser@coursedog.com and assign them the SuperAdmin + Coursedog roles.
+     Alternatively, you can create a second user using plus addressing. For example, register a new user like yourname+automation@yourdomain.com and assign them the SuperAdmin + Coursedog roles.
     Once set up, you can log in to one account in each browser without running into session conflicts. Just be cautious—you’ll still need to pay close attention to which school/account you're working in to avoid mistakes.
 
 ---
@@ -47,6 +46,7 @@ This tool is actively evolving and may not work for every SIS. Validate results 
 ## Technical requirements
 - Windows 10/11 or macOS (Intel/Apple Silicon)
 - Node.js 18+ (LTS recommended)
+- Git (optional; enables auto‑update on launch)
 - Git (Enables auto‑update on launch)
 
 ---
@@ -173,14 +173,14 @@ Pre‑run safety: if nightly merges are detected, the tool attempts to exit grac
 
 ## Manual takeover (human‑in‑the‑loop)
 
-When automation fails, you can take over:
+When automation fails, you can manual takeover:
 - The tool makes the browser visible and resizes it
 - You are expected to make the necessary changes and SAVE in the app, then return to the terminal and press Enter to resume
 
 Details:
 - 5‑minute timeout (skips if no response)
 - If you navigated to a different entity, the tool detects it and restarts the template process
-- Post‑intervention screenshot is captured; aspect ratio resets to automation mode
+- Post‑intervention screenshot is captured; viewport resets to automation mode
 
 ---
 
@@ -242,12 +242,12 @@ Key files:
 ## Known limitations and notes
 - Flows validated with the below SIS; other integrations may require adjustments:
     - Curriculum Management:
-        - Colleague ethos
+        - Colleague Ethos
         - Jenzabar
-    - Scheduling Management:
-        - Colleague ethos
+    - Academic Scheduling:
+        - Colleague Ethos
         - Jenzabar
-        - Banner (both direct and ethos) 
+        - Banner (Direct + Ethos)
 - Client‑specific custom validation rules are not accounted for; saves may fail (error screenshots/logs provided/manual take over offered)
 - Tool does not reopen entities post‑merge to re‑screenshot the final state; verify manually if needed - GET after POST added to test merge summary report.
 - Course creation requires a configured form: defaults to "Propose New Course", but you can enter a custom title if needed.
