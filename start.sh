@@ -17,18 +17,16 @@ rehash_path() {
 
 # 1) Ensure Node.js is installed (prefer user-scoped nvm; fall back to Homebrew if available)
 
-# Check Node.js version
-NODE_VERSION=$(node --version)
-NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
-if [ "$NODE_MAJOR" -lt 18 ]; then
-    echo "❌ Node.js version $NODE_VERSION detected. This tool requires Node.js 18.0 or higher."
-    echo "Please update Node.js (nvm install 18, or Homebrew: brew upgrade node) and try again."
-    exit 1
-fi
-
-echo "✅ Node.js $NODE_VERSION detected"
-
-if ! command -v node &> /dev/null; then
+if command -v node &> /dev/null; then
+    NODE_VERSION=$(node --version)
+    NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
+    if [ "$NODE_MAJOR" -lt 18 ]; then
+        echo "❌ Node.js version $NODE_VERSION detected. This tool requires Node.js 18.0 or higher."
+        echo "Please update Node.js (nvm install 18, or Homebrew: brew upgrade node) and try again."
+        exit 1
+    fi
+    echo "✅ Node.js $NODE_VERSION detected"
+else
     echo "❌ Node.js is not installed or not in PATH."
     # nvm fallback (no sudo required)
     export NVM_DIR="$HOME/.nvm"
@@ -57,6 +55,14 @@ if ! command -v node &> /dev/null; then
         echo "❌ Node.js still not available. Please install Node.js 18+ from https://nodejs.org/ (or install Homebrew from https://brew.sh and run 'brew install node')."
         exit 1
     fi
+    NODE_VERSION=$(node --version)
+    NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
+    if [ "$NODE_MAJOR" -lt 18 ]; then
+        echo "❌ Node.js version $NODE_VERSION detected after install. This tool requires Node.js 18.0 or higher."
+        echo "Please update Node.js (nvm install 18, or Homebrew: brew upgrade node) and try again."
+        exit 1
+    fi
+    echo "✅ Node.js $NODE_VERSION detected"
 fi
 
 # 2) Handle Git presence (only mention Homebrew as a fallback; no auto-install of Homebrew)
