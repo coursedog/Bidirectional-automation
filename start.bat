@@ -5,21 +5,58 @@ cd /d "%~dp0"
 echo Bi-directional Tests Automation Tool - Windows (CMD)
 echo ================================================
 
-REM Ensure Node is available
+REM Ensure Node is available (install via winget if missing)
 where node >nul 2>&1
 if errorlevel 1 (
-  echo Node.js not found in PATH. Please install Node 18+ from https://nodejs.org/
-  pause
-  exit /b 1
+  echo Node.js not found in PATH. Attempting to install Node.js LTS via winget...
+  where winget >nul 2>&1
+  if errorlevel 1 (
+    echo winget not found. Please install Node 18+ from https://nodejs.org/
+    pause
+    exit /b 1
+  ) else (
+    winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+      echo Failed to install Node.js via winget. Please install Node 18+ from https://nodejs.org/
+      pause
+      exit /b 1
+    )
+    echo Re-checking Node.js installation...
+    where node >nul 2>&1
+    if errorlevel 1 (
+      echo Node.js still not found in PATH. Please restart your terminal and try again.
+      pause
+      exit /b 1
+    )
+  )
 )
 
-REM Optional: Auto-update from Git if available
+REM Optional: Auto-update from Git if available (install via winget if missing)
+set HAVEGIT=0
 where git >nul 2>&1
-if errorlevel 1 (
-  echo Git not found in PATH. Skipping auto-update.
-  echo Install Git to enable auto-update: https://git-scm.com/downloads/win
-  echo Or via winget: winget install --id Git.Git -e --source winget
-) else (
+if not errorlevel 1 set HAVEGIT=1
+if "%HAVEGIT%"=="0" (
+  echo Git not found in PATH. Attempting to install Git via winget...
+  where winget >nul 2>&1
+  if errorlevel 1 (
+    echo winget not found. Skipping auto-update.
+    echo Install Git to enable auto-update: https://git-scm.com/downloads/win
+  ) else (
+    winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+    if errorlevel 1 (
+      echo Failed to install Git via winget. Skipping auto-update.
+    ) else (
+      echo Re-checking Git installation...
+      where git >nul 2>&1
+      if not errorlevel 1 set HAVEGIT=1
+      if "%HAVEGIT%"=="0" (
+        echo Git still not found in PATH (may require restarting terminal). Skipping auto-update.
+      )
+    )
+  )
+)
+
+if "%HAVEGIT%"=="1" (
   git rev-parse --is-inside-work-tree >nul 2>&1
   if errorlevel 1 (
     echo Not a Git repository. Skipping auto-update.
@@ -33,7 +70,7 @@ if errorlevel 1 (
       if not defined BRANCH (
         echo Unable to determine current branch. Skipping auto-update.
       ) else (
-        REM Refresh index and detect local changes (dirty working tree)
+        REM Detect local changes (dirty working tree)
         git update-index -q --refresh
         git diff-index --quiet HEAD -- >nul 2>&1
         if errorlevel 1 (
@@ -71,6 +108,8 @@ if errorlevel 1 (
       )
     )
   )
+) else (
+  REM Git unavailable; proceed without auto-update
 )
 
 REM Install deps at root if missing
