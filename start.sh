@@ -52,7 +52,19 @@ if command -v git &> /dev/null; then
           if [[ "$UPDATE" =~ ^[Yy]$ ]]; then
             echo "🔄 Updating project (git pull --ff-only)..."
             if ! git pull --ff-only; then
-              echo "⚠️  git pull failed. Continuing without updating."
+              echo "⚠️  git pull failed. You may have local or untracked changes blocking update."
+              read -p "Force update and discard local changes? (y/n): " FORCE
+              if [[ "$FORCE" =~ ^[Yy]$ ]]; then
+                echo "⚠️  Forcing update: resetting to origin/$BRANCH and cleaning untracked files..."
+                git fetch --all --prune || true
+                if git reset --hard origin/$BRANCH && git clean -fd; then
+                  echo "✅ Force update completed."
+                else
+                  echo "⚠️  Force update failed. Continuing without updating."
+                fi
+              else
+                echo "⏭️  Skipping force update. Continuing with current local version."
+              fi
             fi
           else
             echo "⏭️  Skipping update. Continuing with current local version."

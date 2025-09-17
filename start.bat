@@ -93,7 +93,21 @@ if "%HAVEGIT%"=="1" (
             echo Updating project ^git pull --ff-only^...
             git pull --ff-only
             if errorlevel 1 (
-              echo git pull failed. Continuing without updating.
+              echo git pull failed. You may have local/untracked changes blocking update.
+              set /p FORCE=Force update and discard local changes? y/n: 
+              if /I "!FORCE!"=="Y" (
+                echo Forcing update: resetting to origin/!BRANCH! and cleaning untracked files...
+                git fetch --all --prune
+                git reset --hard origin/!BRANCH!
+                git clean -fd
+                if errorlevel 1 (
+                  echo Force update failed. Continuing without updating.
+                ) else (
+                  echo Force update completed.
+                )
+              ) else (
+                echo Skipping force update. Continuing with current local version.
+              )
             )
           ) else (
             echo Skipping update. Continuing with current local version.
