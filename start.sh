@@ -93,7 +93,7 @@ else
   fi
 fi
 
-# Ensure Node.js is installed (attempt Homebrew install if missing)
+# Ensure Node.js is installed (attempt Homebrew install if missing; else nvm fallback)
 if ! command -v node &> /dev/null; then
     echo "❌ Node.js is not installed or not in PATH."
     if command -v brew &> /dev/null; then
@@ -103,11 +103,29 @@ if ! command -v node &> /dev/null; then
             echo "✅ Node.js installed via Homebrew."
             rehash_path
         else
-            echo "⚠️  Failed to install Node.js via Homebrew. Please install from https://nodejs.org/"
-            exit 1
+            echo "⚠️  Failed to install Node.js via Homebrew. Falling back to nvm (user install)."
         fi
-    else
-        echo "ℹ️  Homebrew not available. Please install Node.js 18+ from https://nodejs.org/"
+    fi
+    if ! command -v node &> /dev/null; then
+        # nvm fallback (no sudo required)
+        export NVM_DIR="$HOME/.nvm"
+        mkdir -p "$NVM_DIR" >/dev/null 2>&1 || true
+        if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+          echo "Installing nvm (Node Version Manager) to $NVM_DIR ..."
+          curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash -s -- --no-use || true
+        fi
+        # shellcheck disable=SC1090
+        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+        if command -v nvm >/dev/null 2>&1; then
+          echo "Installing Node.js LTS via nvm..."
+          nvm install 18 >/dev/null 2>&1 || nvm install --lts >/dev/null 2>&1 || true
+          nvm use 18 >/dev/null 2>&1 || nvm use --lts >/dev/null 2>&1 || true
+        else
+          echo "⚠️  Failed to set up nvm automatically. Please install Node.js 18+ from https://nodejs.org/"
+        fi
+    fi
+    if ! command -v node &> /dev/null; then
+        echo "❌ Node.js still not available. Please install Node.js 18+ (Homebrew: brew install node, or nvm)."
         exit 1
     fi
 fi
@@ -117,7 +135,7 @@ NODE_VERSION=$(node --version)
 NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
 if [ "$NODE_MAJOR" -lt 18 ]; then
     echo "❌ Node.js version $NODE_VERSION detected. This tool requires Node.js 18.0 or higher."
-    echo "Please update Node.js (Homebrew: brew upgrade node) and try again."
+    echo "Please update Node.js (Homebrew: brew upgrade node, or nvm install 18) and try again."
     exit 1
 fi
 
