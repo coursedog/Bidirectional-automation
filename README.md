@@ -12,7 +12,7 @@ This tool automates the process of doing bi-directional testing: creating and up
 
 - This tool is in active development and is not fully compliant with every SIS.
 - Bugs and hiccups are expected. Validate results before relying on them for production.
-- Need help or want to request an enhancement? Please reach out via the Bi-di tester enhancement requests page: [PLACEHOLDER_LINK]
+- Need help or want to request an enhancement? Please reach out via the Bi-di tester enhancement requests page: [Bi-di tester enhancement requests](https://www.notion.so/249f804589d180d0af82fea734eaf054?pvs=25)
 
 **Download and Setup Instructions:**
 
@@ -47,6 +47,9 @@ This tool automates the process of doing bi-directional testing: creating and up
         > 
         </aside>
         
+- Git (optional): Required only if you want the start scripts to auto-update the project with `git pull --ff-only` on launch.
+  - Windows: see Git for Windows downloads [`git-scm.com/downloads/win`](https://git-scm.com/downloads/win)
+  - macOS: see Git for macOS options [`git-scm.com/downloads/mac`](https://git-scm.com/downloads/mac)
 
 # Installation Instructions
 
@@ -60,7 +63,7 @@ This tool automates the process of doing bi-directional testing: creating and up
 4. **Run the automated installer**:
     
     ```bash
-    node install_dependencies.js
+    node src/install_dependencies.js
     
     ```
     
@@ -125,7 +128,7 @@ After installation, you can start the tool using any of these methods:
 ### Method 1: Direct Execution
 
 ```bash
-node index.js
+node main.js
 
 ```
 
@@ -168,7 +171,17 @@ node index.js
     ./start.sh
     
     ```
-    
+
+#### Auto-update on launch (both Windows and macOS)
+
+- On start, `start.bat` and `start.sh` attempt `git pull --ff-only` to fetch the latest project updates when:
+  - Git is installed and available on PATH
+  - The directory is a Git repository with an `origin` remote
+  - There are no local uncommitted changes
+- If these conditions are not met, the scripts skip updating and continue to run the app normally.
+- Install Git if you want auto-update:
+  - Windows: [`git-scm.com/downloads/win`](https://git-scm.com/downloads/win)
+  - macOS: [`git-scm.com/downloads/mac`](https://git-scm.com/downloads/mac)
 
 ### **Linux:**
 
@@ -215,7 +228,7 @@ chmod +x start.sh
 5. **Run the automation script**:
     
     ```powershell
-    node index.js
+    node main.js
     
     ```
     
@@ -253,7 +266,7 @@ chmod +x start.sh
 4. **Run the automation script**:
     
     ```bash
-    node index.js
+    node main.js
     
     ```
     
@@ -298,7 +311,7 @@ The script will prompt you for the following information:
     - `5` for All of the Above.
     
     **For Both Products:**
-    - Action selection is skipped - automatically runs all actions from both products sequentially (Academic Scheduling first, then Curriculum Management).
+    - **Comprehensive Testing**: Runs all Academic Scheduling actions first, followed by all Curriculum Management actions, all within a single organized run folder.
 
 **Note**: During any step of the input process, you can type `b` or `back` to return to the previous question and modify your selection.
 
@@ -350,7 +363,7 @@ The tool generates several types of output files in organized folder structures:
 All outputs are organized in a hierarchical folder structure:
 
 ```
-schoolId/
+src/schools/{schoolId}/
 └── Run-{timestamp}/
     ├── Academic Scheduling:
     │   ├── update/
@@ -637,6 +650,7 @@ If you encounter issues not covered in this troubleshooting guide:
 - Course edit page: adds retry handling for "There are proposals in Flight" message before skipping
 - Windows start script: `start.bat` now restarts the flow when a run finishes instead of closing
 - Field-differences output: refactored for clearer, more visually readable diffs
+- Start scripts: auto-update project on launch with `git pull --ff-only` when possible (Git installed, clean tree, `origin` set)
 
 ## New in v1.5:
 - **Enhanced User Experience**: 

@@ -1,5 +1,5 @@
 @echo off
-setlocal
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 echo Bi-directional Tests Automation Tool - Windows (CMD)
@@ -28,11 +28,13 @@ if errorlevel 1 (
     if errorlevel 1 (
       echo No 'origin' remote configured. Skipping auto-update.
     ) else (
-      for /f %%i in ('git status --porcelain ^| find /c /v ""') do set CHANGES=%%i
-      if not "%CHANGES%"=="0" (
+      REM Refresh index and check for a clean working tree
+      git update-index -q --refresh
+      git diff-index --quiet HEAD -- >nul 2>&1
+      if errorlevel 1 (
         echo Local changes detected. Skipping auto-update to avoid merge conflicts.
       ) else (
-        echo Updating project (git pull --ff-only)...
+        echo Updating project ^(git pull --ff-only^)...
         git pull --ff-only
         if errorlevel 1 (
           echo git pull failed. Continuing without updating.
