@@ -38,7 +38,11 @@ if command -v git &> /dev/null; then
             echo "⏭️  Skipping update. Continuing with current local version."
           fi
         else
-          echo "✅ Project is up to date."
+          if [ "$DIRTY" = "1" ]; then
+            echo "ℹ️  Local changes detected. No remote updates. Continuing with current local version."
+          else
+            echo "✅ Project is up to date."
+          fi
         fi
       fi
     else
@@ -48,15 +52,44 @@ if command -v git &> /dev/null; then
     echo "ℹ️  Not a Git repository. Skipping auto-update."
   fi
 else
-  echo "ℹ️  Git not found. Skipping auto-update."
-  echo "   Install Git to enable auto-update: https://git-scm.com/downloads/mac"
+  echo "ℹ️  Git not found. Attempting to install via Homebrew..."
+  if command -v brew &> /dev/null; then
+    brew update >/dev/null 2>&1
+    if brew list git >/dev/null 2>&1 || brew install git; then
+      echo "✅ Git installed via Homebrew."
+      hash -r
+    else
+      echo "⚠️  Failed to install Git via Homebrew."
+    fi
+  else
+    echo "ℹ️  Homebrew not found."
+    # Check if Xcode Command Line Tools are installed
+    if ! xcode-select -p >/dev/null 2>&1; then
+      echo "📦 You can install Apple's Command Line Tools (includes git) with: xcode-select --install"
+      echo "   Or install Homebrew first: https://brew.sh and then: brew install git"
+    else
+      echo "ℹ️  Command Line Tools present, but git not found in PATH. Consider reinstalling git via Homebrew."
+    fi
+  fi
 fi
 
-# Check if Node.js is installed
+# Check if Node.js is installed (attempt Homebrew install if missing)
 if ! command -v node &> /dev/null; then
-    echo "❌ Node.js is not installed or not in PATH"
-    echo "Please install Node.js 18.0 or higher from https://nodejs.org/"
-    exit 1
+    echo "❌ Node.js is not installed or not in PATH. Attempting Homebrew install..."
+    if command -v brew &> /dev/null; then
+        brew update >/dev/null 2>&1
+        # Install current Node (>=18 is acceptable for this tool)
+        if brew list node >/dev/null 2>&1 || brew install node; then
+            echo "✅ Node.js installed via Homebrew."
+            hash -r
+        else
+            echo "⚠️  Failed to install Node.js via Homebrew. Please install from https://nodejs.org/"
+            exit 1
+        fi
+    else
+        echo "ℹ️  Homebrew not found. Please install Node.js 18+ from https://nodejs.org/"
+        exit 1
+    fi
 fi
 
 # Check Node.js version
@@ -64,7 +97,7 @@ NODE_VERSION=$(node --version)
 NODE_MAJOR=$(echo $NODE_VERSION | cut -d. -f1 | tr -d 'v')
 if [ "$NODE_MAJOR" -lt 18 ]; then
     echo "❌ Node.js version $NODE_VERSION detected. This tool requires Node.js 18.0 or higher."
-    echo "Please update Node.js and try again."
+    echo "Please update Node.js (Homebrew: brew upgrade node) and try again."
     exit 1
 fi
 
