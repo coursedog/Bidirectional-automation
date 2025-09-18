@@ -187,19 +187,23 @@ fi
 echo "✅ Environment check passed"
 
 echo ""
-echo "🎯 Starting the automation tool..."
-echo ""
-
-# Run the main application
-node main.js
-
-# Check exit status
-if [ $? -ne 0 ]; then
-    echo ""
+while true; do
+  echo "🎯 Starting the automation tool..."
+  echo ""
+  set +e
+  node main.js
+  exit_code=$?
+  set -e
+  echo ""
+  if [ $exit_code -ne 0 ]; then
     echo "❌ The application exited with an error."
     echo "Please check the console output above for details."
-    exit 1
-else
-    echo ""
+  else
     echo "✅ Application completed successfully."
-fi
+  fi
+  read -p "Run again? (y/n): " run_again
+  if [[ ! $run_again =~ ^[Yy]$ ]]; then
+    break
+  fi
+  echo ""
+done
