@@ -143,9 +143,18 @@ if not exist "main.js" (
   exit /b 1
 )
 
+:RUN_LOOP
 echo Starting app...
 node main.js
 
+echo.
+echo Run completed.
+REM Use CHOICE for a clean Y/N prompt
+CHOICE /C YN /N /M "Run again? (Y/N): "
+IF ERRORLEVEL 2 GOTO END
+IF ERRORLEVEL 1 GOTO RUN_LOOP
+
+:END
 echo.
 echo Finished. Press any key to close.
 pause >nul
