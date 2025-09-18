@@ -39,14 +39,18 @@ This tool is actively evolving and may not work for every SIS. Validate results 
         - Note: Only open the merge report URL after the application has finished running all tests (when applicable), to avoid being logged out of the app.
     💡
      Alternatively, you can create a second user using plus addressing. For example, register a new user like yourname+automation@yourdomain.com and assign them the SuperAdmin + Coursedog roles.
-    Once set up, you can log in to one account in each browser without running into session conflicts. Just be cautious—you’ll still need to pay close attention to which school/account you're working in to avoid mistakes.
-
+     Once set up, you can log in to one account in each browser without running into session conflicts. Just be cautious—you’ll still need to pay close attention to which school/account you're working in to avoid mistakes.
+- (Optional) – If you need to control which sections/courses the application has access to, you might want to create saved views to achieve that.
+    - Example where this can come in handy:
+        - For Banner schools there are some specific requirements, such as:
+            - Not being able to change the part of term if a section already has an instructor.
+            - Not being able to cancel a section if it already has a meeting.
+    - We can leverage saved views so the app only accesses sections with actualEnrollment = 0, or meetingPatterns ≠ null, etc. You can even configure a saved view to filter a specific section or course, if needed.
 ---
 
 ## Technical requirements
 - Windows 10/11 or macOS (Intel/Apple Silicon)
 - Node.js 18+ (LTS recommended)
-- Git (optional; enables auto‑update on launch)
 - Git (Enables auto‑update on launch)
 
 ---
@@ -232,7 +236,7 @@ Key files:
 ---
 
 ## Version info
-- Current Version: v1.6
+- Current Version: v1.5.5
 - Supported Platforms: Windows, macOS
 - Required Node.js: 18+
 - Browsers: Chromium, Firefox, WebKit (via Playwright)
