@@ -72,7 +72,7 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
 
     const tableRows = [];
     const skipSet = new Set((__diffState && __diffState.context && Array.isArray(__diffState.context.skipFields)) ? __diffState.context.skipFields : []);
-    for (const key of Object.keys(beforeValues).filter(k => !k.startsWith('_'))) {
+    for (const key of Object.keys(beforeValues).filter(k => !k.startsWith('_') && k !== '_disabledFields')) {
       const topLevelQuestionid = String(key).split('.')[0];
       const hidden = (beforeValues._hiddenFields && beforeValues._hiddenFields[topLevelQuestionid]) || (afterValues._hiddenFields && afterValues._hiddenFields[topLevelQuestionid]);
       if (hidden) continue; // remove hidden fields from report entirely
@@ -92,7 +92,8 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
     if (tableRows.length === 0) return false;
 
     const header = '| Field | Original | New | Status | Comments |\n| --- | --- | --- | --- | --- |';
-    const diffText = `${header}\n${tableRows.join('\n')}`;
+    const legend = '⏭️ - Skipped field\n\n✅ - Updated field\n\n⛔ - Disabled field\n\n❌ - Unable to update (other reason)';
+    const diffText = `${legend}\n\n${header}\n${tableRows.join('\n')}`;
     const diffFileName = `${schoolId}-${action}-field-differences-${dateStr || getTimestamp()}.txt`;
     const diffFilePath = path.join(outputDir, diffFileName);
     fs.writeFileSync(diffFilePath, diffText, 'utf8');

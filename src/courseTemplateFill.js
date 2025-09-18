@@ -91,6 +91,22 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
         continue;
       }
       
+      // For Workday schools, skip status validation entirely
+      const skipStatusValidation = typeof schoolId === 'string' && schoolId.toLowerCase().includes('workday');
+      if (skipStatusValidation) {
+        console.log(`   ┣ ⏭️ Skipping status validation for schoolId "${schoolId}"`);
+        // Still avoid reusing the same course in a single session
+        if (sessionUsedCourses.has(courseCode)) {
+          console.log(`   ┣ ⏭️ Skipping previously used course code "${courseCode}"`);
+          continue;
+        }
+        console.log(`   ┗ ✅ Selected course "${courseCode}" without status check (Workday mode)`);
+        sessionUsedCourses.add(courseCode);
+        console.log(`   ┗ 📝 Tracked course code "${courseCode}" for test case "${action}" in session`);
+        console.log(`   ┗ 📊 Session now has ${sessionUsedCourses.size} used course codes`);
+        return row;
+      }
+      
       // Second pass: check for suitable status
       for (let j = 0; j < cellCount; j++) {
         const cell = cells.nth(j);
@@ -125,29 +141,28 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
               continue; // Skip to next row
             }
             
-            // Skip if Course Short Title or any cell contains an in-progress CD test suffix
-            try {
-              let hasCDSuffix = false;
-              const bannedFragments = ['-cd', '-cdt', '-cdte', '-cdtes', '-cdtest'];
-              // Prefer the second cell as likely Short Title
-              if (cellCount > 1) {
-                const secondCellTxt = (await cells.nth(1).textContent()) || '';
-                const s = secondCellTxt.toLowerCase();
-                if (bannedFragments.some(f => s.includes(f))) hasCDSuffix = true;
-              }
-              // If still not detected, scan all cells in the row as a fallback
-              if (!hasCDSuffix) {
-                for (let k = 0; k < cellCount; k++) {
-                  const t = (await cells.nth(k).textContent()) || '';
-                  const tl = t.toLowerCase();
-                  if (bannedFragments.some(f => tl.includes(f))) { hasCDSuffix = true; break; }
+              try {
+                let hasCDSuffix = false;
+                const bannedFragments = ['-cd', '-cdt', '-cdte', '-cdtes', '-cdtest'];
+                // Prefer the second cell as likely Short Title
+                if (cellCount > 1) {
+                  const secondCellTxt = (await cells.nth(1).textContent()) || '';
+                  const s = secondCellTxt.toLowerCase();
+                  if (bannedFragments.some(f => s.includes(f))) hasCDSuffix = true;
                 }
-              }
-              if (hasCDSuffix) {
-                console.log(`   ┣ ⏭️ Skipping course "${courseCode}" - row contains a CD test suffix (-CD, -CDt, -CDte, -CDtes, -CDtest)`);
-                break; // move to next row
-              }
-            } catch (_) {}
+                // If still not detected, scan all cells in the row as a fallback
+                if (!hasCDSuffix) {
+                  for (let k = 0; k < cellCount; k++) {
+                    const t = (await cells.nth(k).textContent()) || '';
+                    const tl = t.toLowerCase();
+                    if (bannedFragments.some(f => tl.includes(f))) { hasCDSuffix = true; break; }
+                  }
+                }
+                if (hasCDSuffix) {
+                  console.log(`   ┣ ⏭️ Skipping course "${courseCode}" - row contains a CD test suffix (-CD, -CDt, -CDte, -CDtes, -CDtest)`);
+                  break; // move to next row
+                }
+              } catch (_) {}
             
             console.log(`   ┗ ✅ Found suitable course "${courseCode}" (status: "${cellText.trim()}", matched "${matchedKeyword}" as ${matchType}) in row ${i + 1} on page ${currentPage}`);
             
@@ -1295,7 +1310,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     processedFields.add(question.qid);
     
     // Skip certain fields that shouldn't be modified
-    const skipFields = ['effectiveStartDate', 'effectiveEndDate', 'crsApprovalDate', 'crsStatusDate', 'subjectCode', 'courseNumber', 'crsApprovalAgencyIds', 'status', 'sisId', 'allowIntegration'];
+    const skipFields = ['effectiveStartDate', 'effectiveEndDate', 'crsApprovalDate', 'crsStatusDate', 'subjectCode', 'courseNumber', 'crsApprovalAgencyIds', 'status', 'sisId', 'allowIntegration', 'firstAvailable'];
     
     // For inactivation, allow status and effectiveEndDate to be modified
     const isInactivationField = action === 'inactivateCourse' && (question.qid === 'status' || question.qid === 'effectiveEndDate');
@@ -1306,7 +1321,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     // For course creation, allow specific fields but always skip sisId
     const isCreationAction = action === 'createCourse';
     const alwaysSkipFields = ['sisId', 'effectiveEndDate']; // Fields that should NEVER be modified, except during inactivation/revision
-    const creationAllowedFields = ['status', 'effectiveStartDate', 'effectiveEndDate', 'crsApprovalDate', 'crsStatusDate', 'subjectCode', 'courseNumber']; // Fields allowed for creation
+    const creationAllowedFields = ['status', 'effectiveStartDate', 'effectiveEndDate', 'crsApprovalDate', 'crsStatusDate', 'subjectCode', 'courseNumber', 'firstAvailable']; // Fields allowed for creation
     
     // Always skip certain fields regardless of action, BUT allow inactivation/revision overrides
     if (alwaysSkipFields.includes(question.qid) && !isInactivationField && !isRevisionField) {
@@ -1437,94 +1452,6 @@ async function fillCourseField(page, question, action = 'updateCourse') {
       }
     }
     
-    // Strategy 2: By field ID (using question.qid as primary identifier)
-    // if (!fieldElement) {
-    //   let idSelectors = [
-    //     // Use question.qid for ID-based selectors
-    //     `#field-${question.qid}`,
-    //     `#field_${question.qid}`,
-    //     `#field-${question.qid} input`,
-    //     `#field-${question.qid} select`,
-    //     `#field-${question.qid} textarea`,
-    //     `#field-${question.qid} .multiselect__input`,
-    //     `[id="field-${question.qid}"] input`,
-    //     `[id="field-${question.qid}"] select`,
-    //     `[id="field-${question.qid}"] textarea`,
-    //     `[id="field-${question.qid}"] .multiselect__input`
-    //   ];
-    //   
-    //   // For nested credit fields, add additional ID-based selectors
-    //   if (question.originalFieldType && question.originalSubFieldKey) {
-    //     const parentField = question.originalFieldType;
-    //     const subField = question.originalSubFieldKey;
-    //     
-    //     idSelectors.push(
-    //       `#field-credits-${parentField}-${subField}`,
-    //       `#field-${parentField}-${subField}`,
-    //       `#field_credits_${parentField}_${subField}`,
-    //       `#field_${parentField}_${subField}`,
-    //       `#field-credits-${parentField}-${subField} input`,
-    //       `#field-${parentField}-${subField} input`,
-    //       `[id*="${parentField}"][id*="${subField}"] input`,
-    //       `[id*="credits"][id*="${parentField}"][id*="${subField}"] input`
-    //     );
-    //   }
-    //   
-    //   for (const selector of idSelectors) {
-    //     const element = page.locator(selector).first();
-    //     if (await element.count() > 0) {
-    //       const isVisible = await element.isVisible().catch(() => false);
-    //       const isEnabled = await element.isEnabled().catch(() => true);
-    //       
-    //       if (isVisible && isEnabled) {
-    //         fieldElement = element;
-    //         fieldStrategy = `id: ${selector}`;
-    //         console.log(`   ┣ ✅ Field found via ID: ${selector}`);
-    //         break;
-    //       }
-    //     }
-    //   }
-    // }
-    
-    // Strategy 3: By label text (fallback)
-    // if (!fieldElement && question.label) {
-    //   console.log(`   ┣ Trying label-based search for: "${question.label}"`);
-    //   
-    //   // Look for labels with this text, then find associated inputs
-    //   const labelElement = page.locator(`label:has-text("${question.label}")`).first();
-    //   if (await labelElement.count() > 0) {
-    //     // Try to find the associated input by 'for' attribute
-    //     const forAttr = await labelElement.getAttribute('for');
-    //     if (forAttr) {
-    //       const associatedInput = page.locator(`#${forAttr}`);
-    //       if (await associatedInput.count() > 0) {
-    //         const isVisible = await associatedInput.isVisible().catch(() => false);
-    //         const isEnabled = await associatedInput.isEnabled().catch(() => true);
-    //         
-    //         if (isVisible && isEnabled) {
-    //           fieldElement = associatedInput;
-    //           fieldStrategy = `label association: ${forAttr}`;
-    //         }
-    //       }
-    //     }
-    //     
-    //     // If no 'for' attribute, look for nearby inputs
-    //     if (!fieldElement) {
-    //       const nearbyInputs = labelElement.locator('xpath=..//*[self::input or self::select or self::textarea or contains(@class, "multiselect")]').first();
-    //       if (await nearbyInputs.count() > 0) {
-    //         const isVisible = await nearbyInputs.isVisible().catch(() => false);
-    //         const isEnabled = await nearbyInputs.isEnabled().catch(() => true);
-    //         
-    //         if (isVisible && isEnabled) {
-    //           fieldElement = nearbyInputs;
-    //           fieldStrategy = `label sibling: ${question.label}`;
-    //         }
-    //       }
-    //     }
-    //   }
-    // }
-    
-    // Strategy 4: Generic search by question type and context (with visibility check)
     // (Removed generic fallback to prevent writing to wrong fields)
     
     if (!fieldElement) {
@@ -3501,12 +3428,30 @@ function generateCourseTestValue(question, existingValue = null) {
   const questionType = question.questionType || question.type;
   const qid = question.qid;
   const label = question.label || '';
+  // Read optional max length from template config validations
+  let configuredMaxLength = null;
+  try {
+    const maybe = question && question.config && question.config.validations && question.config.validations.maxLength;
+    if (typeof maybe === 'number' && Number.isFinite(maybe) && maybe > 0) {
+      configuredMaxLength = Math.floor(maybe);
+    }
+  } catch (_) {}
+  const clampToMax = (value) => {
+    if (configuredMaxLength && typeof value === 'string') {
+      return value.length > configuredMaxLength ? value.slice(0, configuredMaxLength) : value;
+    }
+    return value;
+  };
 
   switch (questionType) {
     case 'text':
       if (existingValue && String(existingValue).trim() !== '') {
         const base = String(existingValue).trim().replace(/(?:-\s*CDtest)+$/i, '');
         const appended = `${base}-CDtest`;
+        // Respect configured maxLength if present; otherwise keep legacy 30 limit for short title
+        if (configuredMaxLength) {
+          return clampToMax(appended);
+        }
         if (qid === 'name' || /short\s*title/i.test(label)) {
           return appended.length > 30 ? appended.slice(0, 30) : appended;
         }
@@ -3514,12 +3459,14 @@ function generateCourseTestValue(question, existingValue = null) {
       }
       // New value when empty
       if (qid === 'name' || /short\s*title/i.test(label)) {
-        return 'Test Course -CDtest'.slice(0, 30);
+        const v = 'Test Course -CDtest';
+        return configuredMaxLength ? clampToMax(v) : v.slice(0, 30);
       }
       if (qid === 'longName' || /long\s*title/i.test(label)) {
-        return 'Test Course Long Title -CDtest';
+        const v = 'Test Course Long Title -CDtest';
+        return clampToMax(v);
       }
-      return 'Test -CDtest';
+      return clampToMax('Test -CDtest');
 
     case 'textarea':
       if (existingValue && String(existingValue).trim() !== '') {
@@ -3528,12 +3475,12 @@ function generateCourseTestValue(question, existingValue = null) {
         const deduped = trimmed.replace(/(?:-\s*CDtest)+$/i, '');
         // Also guard against embedded repeated spaces/dashes
         const once = `${deduped}-CDtest`;
-        return once;
+        return clampToMax(once);
       }
       if (qid === 'description' || /description/i.test(label)) {
-        return 'Automated test description -CDtest';
+        return clampToMax('Automated test description -CDtest');
       }
-      return 'Test description -CDtest';
+      return clampToMax('Test description -CDtest');
 
     case 'number':
       // Keep nested credit fields deterministic
@@ -3644,6 +3591,7 @@ async function saveCourseFieldDifferences(beforeValues, afterValues, subfolder, 
     // Remove internal meta keys from comparison
     allKeys.delete('_fieldIdentifiers');
     allKeys.delete('_hiddenFields');
+    allKeys.delete('_disabledFields');
     
     const skipSet = new Set((global.__courseDiffSkipFields && Array.isArray(global.__courseDiffSkipFields)) ? global.__courseDiffSkipFields : []);
     
@@ -3680,7 +3628,8 @@ async function saveCourseFieldDifferences(beforeValues, afterValues, subfolder, 
 
     if (tableRows.length > 0) {
       const header = '| Field | Original | New | Status | Comments |\n| --- | --- | --- | --- | --- |';
-      const diffText = `${header}\n${tableRows.join('\n')}`;
+      const legend = '⏭️ - Skipped field\n\n✅ - Updated field\n\n⛔ - Disabled field\n\n❌ - Unable to update (other reason)';
+      const diffText = `${legend}\n\n${header}\n${tableRows.join('\n')}`;
       console.log('\n=== Course Field Differences (Table) ===\n' + diffText);
       
       const now = new Date();

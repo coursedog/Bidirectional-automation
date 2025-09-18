@@ -85,8 +85,8 @@ function gatherInputs() {
       }
 
     } else if (step === 'schoolId') {
-      const reuseHint = previous.schoolId ? ` (Press Enter to reuse: ${previous.schoolId})` : '';
-      const schoolId = prompt(`\nSchool ID (e.g. iwu_colleague_ethos)${reuseHint} (or b to go back): `);
+      const reuseHint = previous.schoolId ? `Press Enter to reuse: ${previous.schoolId}` : '';
+      const schoolId = prompt(`\nEnter your school ID (${reuseHint} or b to go back): `);
       
       if (schoolId.toLowerCase() === 'back' || schoolId.toLowerCase() === 'b') {
         step = 'product';
