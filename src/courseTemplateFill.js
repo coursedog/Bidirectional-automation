@@ -1008,11 +1008,19 @@ async function fillCourseTemplate(page, schoolId, action = 'updateCourse') {
       }
       
       let pageErrorCount = 0;
-      // Share skipFields with diff for status symbol purposes (ensure defined for all actions)
-      const __localSkipFields = Array.isArray(global.__courseDiffSkipFields)
-        ? global.__courseDiffSkipFields
-        : [];
-      global.__courseDiffSkipFields = __localSkipFields;
+      // Initialize skip list for diff based on action
+      const allQids = Object.keys(questions);
+      let initialSkip = [];
+      if (action === 'inactivateCourse') {
+        initialSkip = allQids.filter(qid => qid !== 'status' && qid !== 'effectiveEndDate');
+      } else if (action === 'newCourseRevision') {
+        initialSkip = allQids.filter(qid => qid !== 'effectiveStartDate');
+      } else if (action === 'createCourse') {
+        initialSkip = [];
+      } else {
+        initialSkip = [];
+      }
+      global.__courseDiffSkipFields = initialSkip;
       const maxPageErrors = 3; // Stop after 3 page errors to prevent endless loops
       
       for (const questionKey of questionKeys) {
@@ -1332,6 +1340,14 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     // Skip fields based on action type
     if (skipFields.includes(question.qid) && !isInactivationField && !isRevisionField && !(isCreationAction && creationAllowedFields.includes(question.qid))) {
       console.log(`⏭️ Skipping protected field: ${question.qid}`);
+      try {
+        // Mark top-level qid as skipped for diff table
+        const topLevel = String(question.qid).split('.')[0];
+        if (!global.__courseDiffSkipFields) global.__courseDiffSkipFields = [];
+        if (!global.__courseDiffSkipFields.includes(topLevel)) {
+          global.__courseDiffSkipFields.push(topLevel);
+        }
+      } catch (_) {}
       return;
     }
     
