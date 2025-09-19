@@ -7,6 +7,10 @@ Highlights
 - Enhanced merge report polling with clearer progress and logging.
 - Browser automation stability and timing refinements.
 - Added integrated fields mapping file.
+- Added logs file to run/test folders
+- Updated browser viewports to be responsive
+- Improved debug video aspect ratio
+- Improved differences report logic and visual. 
 
 Changed Files
 - src/browser.js
