@@ -9,7 +9,7 @@ const { signIn } = require('./auth');
 const { goToProduct } = require('./navigation');
 const { openSection, createSection, captureModalBefore, captureModalAfter } = require('./section-screenshot');
 const { getSchoolTemplate } = require('./getSchoolTemplate');
-const { fillBaselineTemplate, saveSection, validateAndResetMeetingPatterns, validateAndResetProfessors, readSectionValues, relationshipsFill, bannerEthosScheduleType, meetAndProfDetails } = require('./sectionTemplateFill');
+const { fillBaselineTemplate, saveSection, validateAndResetMeetingPatterns, validateAndResetProfessors, readSectionValues, relationshipsFill, bannerEthosScheduleType, meetAndProfDetails, ensureRunLogger } = require('./sectionTemplateFill');
 const { createCourse, updateCourse } = require('./courseTemplateFill');
 const { startMergeReportPolling } = require('./mergeReportPoller');
 const { appendRunSummary, generateRunId } = require('./runSummary');
@@ -193,6 +193,9 @@ function getProductFolder(action) {
       const productFolder = getProductFolder(act);
       const subfolder = path.join(runFolder, productFolder, act);
       fs.mkdirSync(subfolder, { recursive: true });
+
+      // Initialize run-scoped logger for this action subfolder before any further logs
+      try { ensureRunLogger(subfolder); } catch (_) {}
 
       // Execute the action
       await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, formName);

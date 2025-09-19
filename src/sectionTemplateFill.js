@@ -5,6 +5,41 @@ const { captureModalError, captureModalAfter } = require('./section-screenshot')
 
 const fs   = require('fs');
 const path = require('path');
+// Simple run-scoped logger that mirrors console output to Logs.md in the run folder
+function ensureRunLogger(outputDir) {
+  try {
+    if (!outputDir) return;
+    if (!global.__origConsole) {
+      global.__origConsole = {
+        log: console.log,
+        warn: console.warn,
+        error: console.error,
+        info: console.info,
+      };
+      const forward = (method) => (...args) => {
+        try {
+          const line = args.map(a => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+          const ts = new Date().toISOString();
+          const out = `[${ts}] ${line}\n`;
+          const lf = (global.__runLogger && global.__runLogger.logFile) || null;
+          if (lf) {
+            fs.appendFileSync(lf, out, 'utf8');
+          }
+        } catch (_) {}
+        try { global.__origConsole[method](...args); } catch (_) {}
+      };
+      console.log = forward('log');
+      console.warn = forward('warn');
+      console.error = forward('error');
+      console.info = forward('info');
+    }
+    const logFile = path.join(outputDir, 'Logs.md');
+    global.__runLogger = { logFile };
+    if (!fs.existsSync(logFile)) {
+      fs.writeFileSync(logFile, `# Logs for run\n\n`, 'utf8');
+    }
+  } catch (_) {}
+}
 const { offerUserTakeover, waitForUserResponseWithTimeout } = require('./userTakeover');
 
 // Diff generation state shared across the flow to ensure we always produce one diff per run
@@ -13,6 +48,29 @@ let __diffState = {
   context: null, // { schoolId, outputDir, action, dateStr }
   wrote: false,
 };
+
+// Capture the full-height relationship modal (edit or conflict) using CDP clip + padding
+async function captureRelationshipModalFull(page, outputPath, isConflict = false) {
+  try {
+    const modal = isConflict
+      ? page.locator('.modal-dialog').filter({ has: page.locator('h3.heading', { hasText: 'Relationship Conflicts' }) }).first()
+      : page.locator('.modal-dialog').filter({ has: page.locator('text=Edit Relationship') }).first();
+
+    await modal.waitFor({ state: 'visible', timeout: 10000 });
+    // Reset modal-body scroll to top for consistent capture
+    try {
+      const body = modal.locator('.modal-body').first();
+      if (await body.count() > 0) await body.evaluate(el => el.scrollTo(0, 0));
+    } catch (_) {}
+
+    // Capture the modal content element directly (exact container the user provided)
+    const content = modal.locator('.modal-content').first();
+    await content.waitFor({ state: 'visible', timeout: 5000 });
+    await content.screenshot({ path: outputPath });
+  } catch (err) {
+    try { await page.screenshot({ path: outputPath, fullPage: true }); } catch (_) {}
+  }
+}
 
 function getTimestamp() {
   const now = new Date();
@@ -54,6 +112,7 @@ function isDeepEqual(a, b) {
 async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, action, dateStr) {
   try {
     if (!beforeValues || !afterValues || !schoolId || !outputDir) return false;
+    ensureRunLogger(outputDir);
 
     // Build qid -> label map from latest section template
     let labelByQid = {};
@@ -72,8 +131,47 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
 
     const tableRows = [];
     const skipSet = new Set((__diffState && __diffState.context && Array.isArray(__diffState.context.skipFields)) ? __diffState.context.skipFields : []);
+
+    // Load integrated fields and restrict diffs to SIS-integrated fields for sections
+    let allowedTopLevels = null;
+    try {
+      const integratedPath = path.join(__dirname, 'integratedFields.json');
+      if (fs.existsSync(integratedPath)) {
+        const integrated = JSON.parse(fs.readFileSync(integratedPath, 'utf8')) || {};
+        const sisKey = Object.keys(integrated)
+          .filter(k => typeof k === 'string' && schoolId.endsWith(k))
+          .sort((a, b) => b.length - a.length)[0];
+        const fields = sisKey && integrated[sisKey] && (integrated[sisKey].section || integrated[sisKey].sections);
+        if (Array.isArray(fields)) {
+          allowedTopLevels = new Set(fields.map(f => String(f).split('.')[0]));
+        }
+      }
+    } catch (_) {}
+
+    // Parse Logs.md to collect per-field error comments for ❌ rows
+    const commentsByQid = new Map();
+    try {
+      const logFile = path.join(outputDir, 'Logs.md');
+      if (fs.existsSync(logFile)) {
+        const logContent = fs.readFileSync(logFile, 'utf8');
+        const regex = /Could not find field:\s*([^\(\n]+)\s*\(([^\)]+)\)/g;
+        let match;
+        while ((match = regex.exec(logContent)) !== null) {
+          const rawQid = (match[1] || '').trim();
+          const rawLabel = (match[2] || '').trim();
+          const msg = `❌ Could not find field: ${rawQid} (${rawLabel})`;
+          if (rawQid) {
+            commentsByQid.set(rawQid, msg);
+            const top = String(rawQid).split('.')[0];
+            if (top && !commentsByQid.has(top)) commentsByQid.set(top, msg);
+          }
+        }
+      }
+    } catch (_) {}
+
     for (const key of Object.keys(beforeValues).filter(k => !k.startsWith('_') && k !== '_disabledFields')) {
       const topLevelQuestionid = String(key).split('.')[0];
+      if (allowedTopLevels && !allowedTopLevels.has(topLevelQuestionid)) continue;
       const hidden = (beforeValues._hiddenFields && beforeValues._hiddenFields[topLevelQuestionid]) || (afterValues._hiddenFields && afterValues._hiddenFields[topLevelQuestionid]);
       if (hidden) continue; // remove hidden fields from report entirely
       const disabled = (beforeValues._disabledFields && beforeValues._disabledFields[topLevelQuestionid]) || (afterValues._disabledFields && afterValues._disabledFields[topLevelQuestionid]);
@@ -83,16 +181,20 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
       const changed = !isDeepEqual(rawBefore, rawAfter);
       const beforeVal = rawBefore === undefined ? '' : rawBefore;
       const afterVal = rawAfter === undefined ? '' : rawAfter;
-      const status = disabled ? '⛔' : (skipSet.has(topLevelQuestionid) ? '⏭️' : (changed ? '✅' : '❌'));
+      const status = disabled ? '🔒' : (skipSet.has(topLevelQuestionid) ? '⏭️' : (changed ? '✅' : '❌'));
       const label = labelByQid[topLevelQuestionid] ? ` (${labelByQid[topLevelQuestionid]})` : '';
       const fieldDisplay = `${key}${label}`;
-      tableRows.push(`| ${fieldDisplay} | ${JSON.stringify(beforeVal)} | ${JSON.stringify(afterVal)} | ${status} |`);
+      let comment = '';
+      if (status === '❌') {
+        comment = commentsByQid.get(key) || commentsByQid.get(topLevelQuestionid) || '';
+      }
+      tableRows.push(`| ${fieldDisplay} | ${JSON.stringify(beforeVal)} | ${JSON.stringify(afterVal)} | ${status} | ${comment}`);
     }
 
     if (tableRows.length === 0) return false;
 
     const header = '| Field | Original | New | Status | Comments |\n| --- | --- | --- | --- | --- |';
-    const legend = '⏭️ - Skipped field\n\n✅ - Updated field\n\n⛔ - Disabled field\n\n❌ - Unable to update (other reason)';
+    const legend = '⏭️ - Skipped field\n\n✅ - Updated field\n\n🔒 - Disabled field\n\n❌ - Unable to update (other reason)';
     const diffText = `${legend}\n\n${header}\n${tableRows.join('\n')}`;
     const diffFileName = `${schoolId}-${action}-field-differences-${dateStr || getTimestamp()}.txt`;
     const diffFilePath = path.join(outputDir, diffFileName);
@@ -117,6 +219,7 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
  */
 async function restartSectionTemplateProcess(page, outputDir, action, schoolId, browser) {
   try {
+    ensureRunLogger(outputDir);
     console.log('\n🔄 RESTARTING SECTION TEMPLATE PROCESS');
     console.log('═══════════════════════════════════════');
     
@@ -168,6 +271,7 @@ async function restartSectionTemplateProcess(page, outputDir, action, schoolId, 
  * @param {string}               schoolId Identifier matching JSON file in Resources folder.
  */
 async function fillBaselineTemplate(page, schoolId, action, outputDir = null, browser = null) {
+  try { ensureRunLogger(outputDir); } catch (_) {}
   // Load the template JSON
   const jsonPath = getLatestSectionTemplateFile(schoolId);
   const raw      = fs.readFileSync(jsonPath, 'utf8');
@@ -1217,6 +1321,7 @@ async function preFillRequiredEmptySectionFields(page) {
 }
 
 async function saveSection(page, outputDir, action, browser = null, schoolId = '') {
+  try { ensureRunLogger(outputDir); } catch (_) {}
   await page.waitForTimeout(1500);
   const saveBtn = page.locator('button[data-test="save-section-btn"]');
 
@@ -1411,6 +1516,7 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
 }
 
 async function validateAndResetMeetingPatterns(page, outputDir, action) {
+  try { ensureRunLogger(outputDir); } catch (_) {}
   console.log('🔎 [Meeting Patterns] Locating Meeting Patterns & Rooms section...');
   const meetingPatternSection = page.locator('[data-card-id="times"]');
   let found = false;
@@ -2650,16 +2756,32 @@ async function readSectionValues(page, schoolId) {
             if (hasDisabled || !isEnabled) disabled = true;
           }
         } else {
+          // First, check for input/textarea/select as usual
           const ctrl = wrapper.locator('input, textarea, select').first();
           if ((await ctrl.count()) > 0) {
             const hasDisabled = (await ctrl.getAttribute('disabled')) !== null;
             const isEnabled = await ctrl.isEnabled().catch(() => true);
             if (hasDisabled || !isEnabled) disabled = true;
+          } else {
+            // Handle button-style date pickers: button > div.form-input-button__display[disabled]
+            const displayEl = wrapper.locator('button .form-input-button__display, .form-input-button__display').first();
+            if ((await displayEl.count()) > 0) {
+              const hasDisabled = (await displayEl.getAttribute('disabled')) !== null;
+              if (hasDisabled) disabled = true;
+            }
           }
         }
         if (disabled) {
           values._disabledFields = values._disabledFields || {};
           values._disabledFields[qid] = true;
+          // Also try to capture the visible text for display-only fields so diffs show actual value
+          try {
+            const displayTextEl = wrapper.locator('.form-input-button__display').first();
+            if ((await displayTextEl.count()) > 0) {
+              const txt = (await displayTextEl.textContent()) || '';
+              values[qid] = txt.trim();
+            }
+          } catch (_) {}
         }
       } catch (_) {}
       // Check if this is a multiselect
@@ -3612,10 +3734,10 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
           console.log('   ┗ New edit relationship modal opened.');
         }
         
-        // Take screenshot before editing
-        console.log('📸 [Relationships] Taking screenshot before editing...');
+        // Take full-height screenshot before editing
+        console.log('📸 [Relationships] Taking full-height screenshot before editing...');
         const screenshotBefore = path.join(outputDir, `${action}-update-modal-before.png`);
-        await editModal.screenshot({ path: screenshotBefore });
+        await captureRelationshipModalFull(page, screenshotBefore);
         console.log(`   ┗ Screenshot saved to ${screenshotBefore}`);
         
         // Capture original values
@@ -3715,10 +3837,10 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
         await addCourseAndSections(page);
         console.log('   ┗ Course and section addition completed for edit.');
         
-        // Take screenshot after editing and adding course/section
-        console.log('📸 [Relationships] Taking screenshot after editing...');
+        // Take full-height screenshot after editing and adding course/section
+        console.log('📸 [Relationships] Taking full-height screenshot after editing...');
         const screenshotAfter = path.join(outputDir, `${action}-update-modal-after.png`);
-        await editModal.screenshot({ path: screenshotAfter });
+        await captureRelationshipModalFull(page, screenshotAfter);
         console.log(`   ┗ Screenshot saved to ${screenshotAfter}`);
 
         // Click save relationship button
@@ -3735,9 +3857,9 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
           if (await conflictModalTitle.count() > 0 && await conflictModalTitle.first().isVisible()) {
             console.log('⚠️ [Relationships] Conflict modal detected during edit! Taking screenshot...');
             
-            // Take screenshot of the conflict modal
+            // Take full screenshot of the conflict modal
             const conflictScreenshotPath = path.join(outputDir, `${action}-conflictModal.png`);
-            await conflictModal.first().screenshot({ path: conflictScreenshotPath });
+            await captureRelationshipModalFull(page, conflictScreenshotPath, true);
             console.log(`   ┗ Conflict modal screenshot saved to ${conflictScreenshotPath}`);
             
             // Click "Save Anyway" button if available
@@ -4031,5 +4153,6 @@ module.exports = {
   readSectionValues, 
   relationshipsFill, 
   bannerEthosScheduleType,
-  meetAndProfDetails
+  meetAndProfDetails,
+  ensureRunLogger
 };

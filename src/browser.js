@@ -6,18 +6,29 @@ async function launch(env, videoDir, videoName, headless = true) {
     ? 'app.coursedog.com'
     : 'staging.coursedog.com';
 
-  // Set both viewport and video size to 1280x720 for correct aspect ratio
-  const contextOptions = { viewport: { width: 1280, height: 6000 } };
+  // During automation, use a tall viewport to capture content.
+  // During manual takeover, disable viewport emulation so the
+  // page follows the OS window size (fully responsive/resizable).
+  const contextOptions = headless
+    ? { viewport: { width: 1280, height: 9000 } }
+    : { viewport: null };
+
   if (videoDir) {
-    contextOptions.recordVideo = {
-      dir: videoDir,
-      size: { width: 1280, height: 6000 }
-    };
+    // In headless mode we pin the video size to match the fixed viewport.
+    // In headed mode we omit size so Playwright derives it from the window.
+    contextOptions.recordVideo = headless
+      ? {
+          dir: videoDir,
+          size: { width: 1280, height: 9000 }
+        }
+      : {
+          dir: videoDir
+        };
   }
 
   const browser = await chromium.launch({ 
     headless: headless,
-    // When headed, start minimized and set reasonable window size
+    // When headed, start minimized; window/viewport becomes responsive via viewport: null
     args: headless ? [] : [
       '--window-size=1400,900',
       '--start-minimized',

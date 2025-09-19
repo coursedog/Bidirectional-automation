@@ -168,29 +168,29 @@ async function getSchoolTemplate(env, schoolId) {
     password: creds.password
   };
 
-  try {
-    
-    const response = await axios.post(url, body, { headers });
-    
-    if (response.data && response.data.token) {
-      console.log('✅ Authentication successful');
-      const token = response.data.token;
+  const maxAttempts = 5;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await axios.post(url, body, { headers });
       
-      // Fetch both section and course templates after successful authentication
-      await fetchSectionTemplate(token, schoolId, env);
-      await fetchCourseTemplate(token, schoolId, env);
-      
-      return token;
-    } else {
-      throw new Error('No token received in response');
+      if (response.data && response.data.token) {
+        console.log('✅ Authentication successful');
+        const token = response.data.token;
+        
+        // Fetch both section and course templates after successful authentication
+        await fetchSectionTemplate(token, schoolId, env);
+        await fetchCourseTemplate(token, schoolId, env);
+        
+        return token;
+      } else {
+        throw new Error('No token received in response');
+      }
+    } catch (_) {
+      console.log('Authentication failed');
+      if (attempt === maxAttempts) {
+        throw new Error('Authentication failed after 5 attempts');
+      }
     }
-  } catch (error) {
-    console.error('❌ Authentication failed:', error.message);
-    if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
-    }
-    throw error;
   }
 }
 

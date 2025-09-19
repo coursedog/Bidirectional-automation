@@ -1,0 +1,27 @@
+﻿Bi-directional Tester - Release Notes
+Date: 2025-09-19
+
+Highlights
+- Major updates to course template filling logic and field handling.
+- Improved section template automation and screenshot capture reliability.
+- Enhanced merge report polling with clearer progress and logging.
+- Browser automation stability and timing refinements.
+- Added integrated fields mapping file.
+
+Changed Files
+- src/browser.js
+- src/courseTemplateFill.js
+- src/getSchoolTemplate.js
+- src/index.js
+- src/mergeReportPoller.js
+- src/section-screenshot.js
+- src/sectionTemplateFill.js
+- src/userTakeover.js
+- src/integratedFields.json (new)
+
+Stats
+- 8 files modified, ~976 insertions, ~359 deletions vs origin/main.
+
+Notes
+- No configuration changes required; run as usual via start scripts.
+- If issues arise with template population or screenshots, check new logs under school run folders.

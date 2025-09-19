@@ -113,9 +113,15 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
       await page.bringToFront();
       console.log('✅ Browser window brought to foreground');
       
-      // Set a comfortable viewport size for user interaction
-      await page.setViewportSize({ width: 1400, height: 900 });
-      console.log('✅ Browser viewport resized for user interaction');
+      // Maximize the OS window via DevTools Protocol so the page becomes responsive
+      try {
+        const client = await page.context().newCDPSession(page);
+        const { windowId } = await client.send('Browser.getWindowForTarget');
+        await client.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'maximized' } });
+        console.log('✅ Browser window maximized for user interaction');
+      } catch (cdpError) {
+        console.log('⚠️ Could not maximize via DevTools Protocol:', cdpError.message);
+      }
       
     } catch (error) {
       console.log('⚠️ Could not automatically bring browser to front:', error.message);
@@ -225,7 +231,7 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
     
     // Reset viewport to automation default and minimize window
     try {
-      await page.setViewportSize({ width: 1280, height: 6000 });
+      await page.setViewportSize({ width: 1280, height: 9000 });
       console.log('🔧 Browser viewport reset to automation mode');
     } catch (error) {
       console.log('⚠️ Could not reset viewport:', error.message);

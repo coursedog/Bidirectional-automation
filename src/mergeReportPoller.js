@@ -341,36 +341,54 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
       markdown += '```json\n' + JSON.stringify(fallbackErrorDetails, null, 2) + '\n```\n';
     }
 
-    // GET resulting-sis-data and persist to file, then append to markdown
-    try {
+    // GET resulting-sis-data and persist to file, then append to markdown (with retries)
+    {
       const baseHost = baseUrl.replace('/api/v1','');
       const sisUrl = `${baseHost}/api/v1/${schoolId}/integration/getMergeReportBackup?backupType=resulting-sis-data&getHeadInfo=false&mergeReportId=${encodeURIComponent(mergeReportId)}`;
       const sisHeaders = {
         'Authorization': `Bearer ${token}`,
         'Accept': 'application/json'
       };
-      const sisResp = await axios.get(sisUrl, { headers: sisHeaders });
-      const sisData = sisResp.data;
-      const sisOutPath = path.join(outputDir, 'dataAfterSync.json');
-      fs.writeFileSync(sisOutPath, JSON.stringify(sisData, null, 2), 'utf8');
-
-      markdown += '\n## GET after POST\n\n';
-      if (sisData && sisData.formattedData && typeof sisData.formattedData === 'object') {
-        const formattedKeys = Object.keys(sisData.formattedData);
-        if (formattedKeys.length === 0) {
-          markdown += '_No formattedData found in response._\n';
-        } else {
-          for (const key of formattedKeys) {
-            markdown += `formattedData.${key}\n`;
-            markdown += '```json\n' + JSON.stringify(sisData.formattedData[key], null, 2) + '\n```\n\n';
+      const maxAttempts = 3;
+      let lastErr = null;
+      let sisData = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          console.log(`🔁 GET after POST attempt ${attempt}/${maxAttempts}...`);
+          const sisResp = await axios.get(sisUrl, { headers: sisHeaders });
+          sisData = sisResp.data;
+          break;
+        } catch (err) {
+          lastErr = err;
+          console.log(`⚠️ GET after POST failed (attempt ${attempt}): ${err && err.message ? err.message : err}`);
+          if (attempt < maxAttempts) {
+            const delayMs = attempt * 5000; // 5s, 10s
+            await new Promise(r => setTimeout(r, delayMs));
           }
         }
-      } else {
-        markdown += '_No formattedData found in response._\n';
       }
-    } catch (getAfterPostError) {
-      console.error('❌ Failed GET after POST (resulting-sis-data):', getAfterPostError.message);
-      markdown += '\n## GET after POST\n\n_Failed to fetch resulting-sis-data._\n';
+
+      markdown += '\n## GET after POST\n\n';
+      if (sisData) {
+        const sisOutPath = path.join(outputDir, 'dataAfterSync.json');
+        fs.writeFileSync(sisOutPath, JSON.stringify(sisData, null, 2), 'utf8');
+        if (sisData && sisData.formattedData && typeof sisData.formattedData === 'object') {
+          const formattedKeys = Object.keys(sisData.formattedData);
+          if (formattedKeys.length === 0) {
+            markdown += '_No formattedData found in response._\n';
+          } else {
+            for (const key of formattedKeys) {
+              markdown += `formattedData.${key}\n`;
+              markdown += '```json\n' + JSON.stringify(sisData.formattedData[key], null, 2) + '\n```\n\n';
+            }
+          }
+        } else {
+          markdown += '_No formattedData found in response._\n';
+        }
+      } else {
+        console.error('❌ Failed GET after POST (resulting-sis-data) after retries:', lastErr && lastErr.message ? lastErr.message : lastErr);
+        markdown += '_Failed to fetch resulting-sis-data after retries._\n';
+      }
     }
 
     const mdFileName = `${schoolId}-sections-${act}${isSecondRun ? '-create' : ''}-mergeReportSummary.md`;
