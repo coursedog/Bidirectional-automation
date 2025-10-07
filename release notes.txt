@@ -1,16 +1,80 @@
 ﻿Bi-directional Tester - Release Notes
-Date: 2025-09-19
+Date: 2025-10-07
+
+===========================================
+Version 1.6.0 - October 2025
+===========================================
 
 Highlights
-- Major updates to course template filling logic and field handling.
-- Improved section template automation and screenshot capture reliability.
-- Enhanced merge report polling with clearer progress and logging.
-- Browser automation stability and timing refinements.
-- Added integrated fields mapping file.
+- Added comprehensive Merge settings validation for integration settings
+- Enhanced authentication with early error detection and clear error messages
+- Fixed critical bug in triple-nested credit fields (credits.creditHours.min/max)
+- Improved retry logic with automatic token regeneration
+- Added automatic dismissal of release notes popup after sign-in
+- Significantly reduced "silent failures" through better validation and error handling
+
+New Features
+- Merge settings checks for integration settings (src/preflightChecks.js):
+  • Validates real-time merges are enabled before running tests
+  • Verifies "Should Coursedog send updates to the SIS?" setting is enabled
+  • Checks appropriate entity types based on product and action
+  • Provides actionable error messages when settings are misconfigured
+  • Prevents wasted time running tests that will fail due to configuration issues
+
+- Enhanced sign-in error handling (src/auth.js):
+  • Early detection of "email not found" errors (fails in ~5 seconds instead of 60+ second timeout)
+  • Clear validation of "password incorrect" errors
+  • Graceful error messages with actionable next steps
+  • Automatic dismissal of Coursedog release notes popup after successful sign-in
+
+Bug Fixes
+- Fixed triple-nested credit fields handling (src/courseTemplateFill.js):
+  • Corrected QID construction to use full path (e.g., "credits.creditHours.min")
+  • Added dynamic parent field tracking instead of hardcoded "credits" prefix
+  • Implemented precise CSS selectors using aria-describedby and field-id patterns
+  • Routed credits fields through fillNestedCreditFields instead of generic handler
+  • Eliminated "e-" character corruption in number inputs
+  • Added comprehensive logging for debugging field targeting
+
+- Token regeneration for GET after POST retries (src/mergeReportPoller.js):
+  • Fresh authentication token generated before each retry attempt
+  • Prevents 401/403 errors due to token expiration during long merge processes
+
+Improvements
+- Better error messages throughout the application
+- More detailed logging for troubleshooting
+- Improved selector reliability for nested form fields
+- Enhanced resilience during long-running operations
+
+Changed Files
+- src/preflightChecks.js (new)
+- src/auth.js
+- src/index.js
+- src/courseTemplateFill.js
+- src/mergeReportPoller.js
+
+Stats
+- 5 files modified, 1 new file, ~350 insertions, ~50 deletions
+
+Notes
+- No configuration changes required; existing workflows remain compatible
+- Merge settings checks run automatically; no user action needed
+- Error messages now provide clear guidance for resolving issues
+
+===========================================
+Version 1.5.5 - September 2025
+===========================================
+
+Highlights
+- Major updates to course template filling logic and field handling
+- Improved section template automation and screenshot capture reliability
+- Enhanced merge report polling with clearer progress and logging
+- Browser automation stability and timing refinements
+- Added integrated fields mapping file
 - Added logs file to run/test folders
 - Updated browser viewports to be responsive
 - Improved debug video aspect ratio
-- Improved differences report logic and visual. 
+- Improved differences report logic and visual
 
 Changed Files
 - src/browser.js
@@ -24,8 +88,8 @@ Changed Files
 - src/integratedFields.json (new)
 
 Stats
-- 8 files modified, ~976 insertions, ~359 deletions vs origin/main.
+- 8 files modified, ~976 insertions, ~359 deletions vs origin/main
 
 Notes
-- No configuration changes required; run as usual via start scripts.
-- If issues arise with template population or screenshots, check new logs under school run folders.
+- No configuration changes required; run as usual via start scripts
+- If issues arise with template population or screenshots, check new logs under school run folders

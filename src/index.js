@@ -5,7 +5,7 @@ const path = require('path');
 const { gatherInputs } = require('./input');
 const { launch } = require('./browser');
 const { seedContext } = require('./context');
-const { signIn } = require('./auth');
+const { signIn, dismissReleaseNotesPopup } = require('./auth');
 const { goToProduct } = require('./navigation');
 const { openSection, createSection, captureModalBefore, captureModalAfter } = require('./section-screenshot');
 const { getSchoolTemplate } = require('./getSchoolTemplate');
@@ -13,6 +13,7 @@ const { fillBaselineTemplate, saveSection, validateAndResetMeetingPatterns, vali
 const { createCourse, updateCourse } = require('./courseTemplateFill');
 const { startMergeReportPolling } = require('./mergeReportPoller');
 const { appendRunSummary, generateRunId } = require('./runSummary');
+const { performPreflightChecks } = require('./preflightChecks');
 //const { runComputerUseAgent } = require('./agent');
 
 // Session-based course tracking system
@@ -62,6 +63,14 @@ function getProductFolder(action) {
     const token = await getSchoolTemplate(env, schoolId);
     console.log('📋 Token:', token);
 
+    // 2) Pre-flight checks
+    try {
+      await performPreflightChecks(env, schoolId, token, productSlug, action);
+    } catch (error) {
+      // Pre-flight check failed - error message already displayed, exit gracefully
+      process.exit(1);
+    }
+
     // Helper to run a single flow with a pre-created run folder (for 'all' action)
     async function runFlowInFolder(act, runFolder) {
       const videoName = `${schoolId}-${act}-debugging-run`;
@@ -81,7 +90,14 @@ function getProductFolder(action) {
       }
       
       // 4) Sign in
-      await signIn(page, email, password, currentProductSlug, env);
+      try {
+        await signIn(page, email, password, currentProductSlug, env);
+        await dismissReleaseNotesPopup(page);
+      } catch (error) {
+        console.error('\n❌', error.message);
+        await browser.close();
+        process.exit(1);
+      }
       // 5) Navigate into product
       await goToProduct(page, currentProductSlug, env);
 
@@ -146,7 +162,14 @@ function getProductFolder(action) {
       if (act === 'update' || act === 'inactivateSection') {
         desiredSlug = 'sm/section-dashboard';
       }
-      await signIn(page, email, password, desiredSlug, env);
+      try {
+        await signIn(page, email, password, desiredSlug, env);
+        await dismissReleaseNotesPopup(page);
+      } catch (error) {
+        console.error('\n❌', error.message);
+        await browser.close();
+        process.exit(1);
+      }
       // 5) Navigate into product
       await goToProduct(page, desiredSlug, env);
 

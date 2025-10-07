@@ -17,7 +17,7 @@ async function pollMergeReport(env, schoolId, act) {
     ? 'https://app.coursedog.com' 
     : 'https://staging.coursedog.com';
 
-  // New endpoint for polling merge status
+  // New endpoint for polling merge statisComplexFieldus
   let apiUrl;
   if (act === 'relationships' || act === 'editRelationships' || act === 'createRelationships') {
     apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=relationships`;
@@ -345,15 +345,20 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     {
       const baseHost = baseUrl.replace('/api/v1','');
       const sisUrl = `${baseHost}/api/v1/${schoolId}/integration/getMergeReportBackup?backupType=resulting-sis-data&getHeadInfo=false&mergeReportId=${encodeURIComponent(mergeReportId)}`;
-      const sisHeaders = {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json'
-      };
+      console.log(`API URL: ${sisUrl}`);
       const maxAttempts = 3;
       let lastErr = null;
       let sisData = null;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
+          // Get fresh token before each attempt
+          console.log(`🔐 Re-authenticating for GET after POST attempt ${attempt}/${maxAttempts}...`);
+          const freshToken = await getAuthToken(env, schoolId);
+          const sisHeaders = {
+            'Authorization': `Bearer ${freshToken}`,
+            'Accept': 'application/json'
+          };
+          
           console.log(`🔁 GET after POST attempt ${attempt}/${maxAttempts}...`);
           const sisResp = await axios.get(sisUrl, { headers: sisHeaders });
           sisData = sisResp.data;

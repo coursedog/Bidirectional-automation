@@ -163,15 +163,22 @@ Tips:
 ## What happens during execution
 
 1) API token retrieval for the selected school
-2) Playwright browser launch in headed mode with video recording
-3) Session setup: cookies and localStorage seeded
-4) Authentication and product navigation
-5) Action execution with safe template filling and school‑specific handling.
-6) Screenshots: before/after full modal and key sections (meeting patterns, instructors)
-7) Save with conflict‑modal handling; error screenshots and offers manual takeover if save fails (more information below)
-8) Merge report polling; detailed markdown summary and run summary updates
+2) Merge settings validation checks:
+   - Verifies real-time merges are enabled
+   - Validates "Should Coursedog send updates to the SIS?" setting
+   - Checks appropriate entity types (sections, relationships, coursesCm)
+   - Exits with clear error messages if settings are misconfigured
+3) Playwright browser launch in headed mode with video recording
+4) Session setup: cookies and localStorage seeded
+5) Authentication with early error detection (invalid email/password)
+6) Automatic dismissal of release notes popup (if present)
+7) Product navigation
+8) Action execution with safe template filling and school‑specific handling
+9) Screenshots: before/after full modal and key sections (meeting patterns, instructors)
+10) Save with conflict‑modal handling; error screenshots and offers manual takeover if save fails (more information below)
+11) Merge report polling with token regeneration; detailed markdown summary and run summary updates
 
-Pre‑run safety: if nightly merges are detected, the tool attempts to exit gracefully.
+Pre‑run safety: Merge settings checks validate integration settings and exit gracefully if misconfigured. If nightly merges are detected during execution, the tool exits with a message.
 
 ---
 
@@ -223,6 +230,12 @@ Key files:
 - Node.js not found: install Node 18+ and restart your terminal
 - Playwright browsers missing: run `npx playwright install`
 - Auth errors: verify credentials (in creds.json not present in GitHub files) and school registration in staging
+- Merge settings check failures:
+  - "Real-time merges are not enabled": Enable real-time merges in Integration Settings
+  - "Should Coursedog send updates to the SIS? is disabled": Enable this setting in Merge Settings for the appropriate entity type
+- Sign-in errors:
+  - "Email not found": Verify email address or register the user to the school
+  - "Password is incorrect": Check credentials and try again
 - Browser issues: close other browsers; check AV/permissions; ensure resources such as RAM and CPU are available
 - No sections/courses: tool exits gracefully; ensure data and merges are available
 - Conflict modals: tool captures and handles them; check `{action}-conflictModal.png`
@@ -236,7 +249,7 @@ Key files:
 ---
 
 ## Version info
-- Current Version: v1.5.5
+- Current Version: v1.6.0
 - Supported Platforms: Windows, macOS
 - Required Node.js: 18+
 - Browsers: Chromium, Firefox, WebKit (via Playwright)

@@ -1182,11 +1182,17 @@ async function fillCourseTemplate(page, schoolId, action = 'updateCourse') {
           
           if (isComplexField) {
             console.log(`🏗️ Processing complex field with nested structure: ${questionKey} (${question.questionType})`);
-            // For other complex fields, try to fill the main field but mark as processed to prevent nested processing
-            await fillCourseField(page, question, action);
-            // Fill any subfields generically from template definition
-            if (question.config && question.config.fields) {
-              await fillSubfieldsFromConfig(page, question, action);
+            
+            // Special handling for credits field which has triple-nested structure
+            if (question.questionType === 'credits') {
+              await fillNestedCreditFields(page, question, action);
+            } else {
+              // For other complex fields, try to fill the main field but mark as processed to prevent nested processing
+              await fillCourseField(page, question, action);
+              // Fill any subfields generically from template definition
+              if (question.config && question.config.fields) {
+                await fillSubfieldsFromConfig(page, question, action);
+              }
             }
             processedFields.add(question.qid);
           } else {
@@ -1321,9 +1327,10 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
           }
           
           // Create a question-like object for the subfield
+          const parentField = question.qid; // e.g., "credits"
           const subFieldQuestion = {
-            qid: `${fieldType}.${subFieldKey}`,
-            dataKey: `${fieldType}.${subFieldKey}`,
+            qid: `${parentField}.${fieldType}.${subFieldKey}`,
+            dataKey: `${parentField}.${fieldType}.${subFieldKey}`,
             label: subFieldConfig.label || `${fieldType} ${subFieldKey}`,
             questionType: subFieldConfig.inputType || 'text',
             type: subFieldConfig.inputType || 'text',
@@ -1331,6 +1338,7 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
             hidden: subFieldConfig.hidden || false,
             required: subFieldConfig.required || false,
             description: subFieldConfig.description || '',
+            originalParentField: parentField, // Track top-level parent (e.g., "credits")
             originalFieldType: fieldType, // Track parent field
             originalSubFieldKey: subFieldKey // Track subfield key
           };
@@ -1366,10 +1374,25 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
             // If numeric, re-target the numeric input and sanitize with the intended value
             if ((subFieldQuestion.questionType === 'number' || subFieldKey === 'min' || subFieldKey === 'max' || subFieldKey === 'value')) {
               try {
-                const idLike = `[id*="${fieldType}"][id*="${subFieldKey}"] input[type="number"], input[id*="${fieldType}"][id*="${subFieldKey}"][type="number"], input[name*="${fieldType}.${subFieldKey}"][type="number"], #field-${fieldType}-${subFieldKey} input[type="number"]`;
-                const numericInput = page.locator(idLike).first();
-                if (await numericInput.count() > 0) {
-                  const fillVal = intendedValue !== null ? intendedValue : String(generateCourseTestValue({ questionType: 'number', qid: `${fieldType}.${subFieldKey}`, originalFieldType: fieldType, originalSubFieldKey: subFieldKey }));
+                const selectors = [
+                  `input[aria-describedby="error-for-${parentField}.${fieldType}.${subFieldKey}"]`,
+                  `#field-${parentField}\\.${fieldType}\\.${subFieldKey} input[type="number"]`,
+                  `[id="field-${parentField}.${fieldType}.${subFieldKey}"] input`,
+                  `[id="field-${parentField}.${fieldType}.${subFieldKey}"] input.form-control`
+                ];
+                
+                let numericInput = null;
+                for (const sel of selectors) {
+                  const candidate = page.locator(sel).first();
+                  if (await candidate.count() > 0) {
+                    numericInput = candidate;
+                    console.log(`      ┣ ✅ Found ${parentField}.${fieldType}.${subFieldKey} via: ${sel}`);
+                    break;
+                  }
+                }
+                
+                if (numericInput) {
+                  const fillVal = intendedValue !== null ? intendedValue : '1';
                   await fillNumberField(page, numericInput, fillVal);
                 }
               } catch (_) {}
@@ -1458,7 +1481,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     processedFields.add(question.qid);
     
     // Skip certain fields that shouldn't be modified
-    const skipFields = ['effectiveStartDate', 'effectiveEndDate', 'crsApprovalDate', 'crsStatusDate', 'subjectCode', 'courseNumber', 'crsApprovalAgencyIds', 'status', 'sisId', 'allowIntegration', 'firstAvailable', 'studentEligibilityReference', 'studentEligibilityRule'];
+    const skipFields = ['effectiveStartDate', 'effectiveEndDate', 'crsApprovalDate', 'crsStatusDate', 'subjectCode', 'courseNumber', 'crsApprovalAgencyIds', 'status', 'sisId', 'allowIntegration', 'firstAvailable', 'studentEligibilityReference', 'studentEligibilityRule', 'crossListedCourses'];
     
     // For inactivation, allow status and effectiveEndDate to be modified
     const isInactivationField = action === 'inactivateCourse' && (question.qid === 'status' || question.qid === 'effectiveEndDate');
@@ -1563,44 +1586,45 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     let fieldElement = null;
     let fieldStrategy = '';
     
+    // Initialize selector array
+    let dataTestSelectors = [];
+    
+    // For nested credit fields (e.g., credits.creditHours.min), add high-priority selectors FIRST
+    if (question.originalParentField && question.originalFieldType && question.originalSubFieldKey) {
+      const topParent = question.originalParentField; // e.g., "credits"
+      const midField = question.originalFieldType; // e.g., "creditHours"
+      const leafField = question.originalSubFieldKey; // e.g., "min"
+      
+      console.log(`   ┣ 🏦  Processing triple-nested field: ${topParent}.${midField}.${leafField}`);
+      
+      // Add high-priority selectors for nested structure matching actual HTML: id="field-credits.creditHours.min"
+      dataTestSelectors.push(
+        `input[aria-describedby="error-for-${topParent}.${midField}.${leafField}"]`,
+        `#field-${topParent}\\.${midField}\\.${leafField} input[type="number"]`,
+        `#field-${topParent}\\.${midField}\\.${leafField} input`,
+        `[id="field-${topParent}.${midField}.${leafField}"] input.form-control`,
+        `[id="field-${topParent}.${midField}.${leafField}"] input`
+      );
+    }
+    
     // Strategy 1: By data-test attribute (use only question.qid to prevent duplicates)
-    let dataTestSelectors = [
+    // Escape dots in QID for CSS selectors
+    const escapedQid = question.qid.replace(/\./g, '\\.');
+    dataTestSelectors.push(
       `[data-test="${question.qid}"]`,
       `input[data-test="${question.qid}"]`,
       `select[data-test="${question.qid}"]`,
       `textarea[data-test="${question.qid}"]`,
       `.multiselect[data-test="${question.qid}"]`,
       `div[data-test="${question.qid}"] .multiselect`,
-      // Enhanced selectors to find the actual input within wrappers
-      `#field-${question.qid} input`,
-      `#field-${question.qid} select`,
-      `#field-${question.qid} textarea`,
-      `#field-${question.qid} .multiselect`,
+      // Enhanced selectors with properly escaped dots for CSS
+      `#field-${escapedQid} input`,
+      `#field-${escapedQid} select`,
+      `#field-${escapedQid} textarea`,
+      `#field-${escapedQid} .multiselect`,
       `div[id="field-${question.qid}"] input.form-control`,
       `div[id="field-${question.qid}"] input.multiselect__input`
-    ];
-    
-    // For nested credit fields (e.g., creditHours.min), add additional selectors
-    if (question.originalFieldType && question.originalSubFieldKey) {
-      const parentField = question.originalFieldType;
-      const subField = question.originalSubFieldKey;
-      
-      // Add selectors for nested structure like credits.creditHours.min
-      dataTestSelectors.push(
-        `[data-test="credits.${parentField}.${subField}"]`,
-        `[data-test="${parentField}.${subField}"]`,
-        `input[data-test="credits.${parentField}.${subField}"]`,
-        `input[data-test="${parentField}.${subField}"]`,
-        `[aria-describedby*="credits.${parentField}.${subField}"]`,
-        `[aria-describedby*="${parentField}.${subField}"]`,
-        `input[aria-describedby*="credits.${parentField}.${subField}"]`,
-        `input[aria-describedby*="${parentField}.${subField}"]`,
-        `input[name*="${parentField}.${subField}"]`,
-        `input[id*="${parentField}.${subField}"]`
-      );
-      
-      console.log(`   ┣ 🏦  Enhanced selectors for nested field: ${parentField}.${subField}`);
-    }
+    );
 
     // Special selectors for WYSIWYG editors (e.g., description)
     try {
@@ -1627,7 +1651,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
         if (isVisible && isEnabled) {
           fieldElement = element;
           fieldStrategy = `data-test: ${selector}`;
-          console.log(`   ┣ ✅ Field found via data-test: ${selector}`);
+          console.log(`   ┣ ✅ Field "${question.qid}" found via selector: ${selector}`);
           break;
         }
       }
@@ -1799,11 +1823,14 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     // Generate test value only for regular fields
     const existingValue = hadValueBefore ? originalValue : null;
     let testValue = generateCourseTestValue(question, existingValue);
+    console.log(`   ┣ 📝 Generated test value for ${question.qid}: ${JSON.stringify(testValue)}`);
+    
     // Sanitize numeric values to avoid accidental exponent characters
     let finalTestValue = testValue;
     if ((question.questionType || question.type) === 'number') {
       const match = String(testValue).match(/-?\d+(?:\.\d+)?/);
       finalTestValue = match ? match[0] : '1';
+      console.log(`   ┣ 🔢 Sanitized number value: ${JSON.stringify(testValue)} → "${finalTestValue}"`);
     }
     if (!testValue && testValue !== false && testValue !== 0) {
       console.log(`   ┗ ⏭️ No test value generated for: ${question.qid}`);
@@ -1998,6 +2025,8 @@ async function fillWysiwygField(page, fieldElement, value) {
  */
 async function fillNumberField(page, fieldElement, value) {
   try {
+    console.log(`      🔢 fillNumberField called with value: ${JSON.stringify(value)}`);
+    
     // Ensure we operate on the actual input element
     let inputEl = fieldElement;
     try {
@@ -2018,14 +2047,22 @@ async function fillNumberField(page, fieldElement, value) {
     };
 
     const toFill = sanitizeNumber(value);
+    console.log(`      🔢 Sanitized value to fill: "${toFill}"`);
+    
     await inputEl.clear();
     await page.waitForTimeout(50);
     await inputEl.fill(toFill);
+    
     // Verify no alpha characters snuck in; refix if needed
     const after = await inputEl.inputValue().catch(() => toFill);
+    console.log(`      🔢 Value after fill: "${after}"`);
+    
     if (/[a-zA-Z]/.test(after || '')) {
+      console.log(`      ⚠️ Detected alpha characters in number field, refilling...`);
       await inputEl.clear();
       await inputEl.fill(toFill);
+      const afterRefix = await inputEl.inputValue().catch(() => toFill);
+      console.log(`      🔢 Value after refix: "${afterRefix}"`);
     }
   } catch (error) {
     try {
