@@ -175,8 +175,9 @@ Tips:
 7) Product navigation
 8) Action execution with safe template filling and school‑specific handling
 9) Screenshots: before/after full modal and key sections (meeting patterns, instructors)
-10) Save with conflict‑modal handling; error screenshots and offers manual takeover if save fails (more information below)
-11) Merge report polling with token regeneration; detailed markdown summary and run summary updates
+10) Template issue detection: checks for API errors at critical points (instructor search, before/after saves)
+11) Save with conflict‑modal handling; error screenshots and offers manual takeover if save fails (more information below)
+12) Merge report polling with token regeneration; detailed markdown summary and run summary updates
 
 Pre‑run safety: Merge settings checks validate integration settings and exit gracefully if misconfigured. If nightly merges are detected during execution, the tool exits with a message.
 
@@ -222,7 +223,9 @@ Key files:
 - Merge report markdown summary: `{schoolId}-sections-{action}-mergeReportSummary.md`
 - Resulting SIS data: `dataAfterSync.json` (GET after POST)
 - Run summary: `RUN-SUMMARY-{schoolId}.md` (one or two tables depending on whether both products ran)
+- API error modal: `{action}-api-error-modal.png` (when template validation errors occur)
 - Debug videos: `src/debug-videos/*.webm`
+- Logs: `Logs.md` (console output for each run)
 
 ---
 
@@ -236,6 +239,14 @@ Key files:
 - Sign-in errors:
   - "Email not found": Verify email address or register the user to the school
   - "Password is incorrect": Check credentials and try again
+- Template issues:
+  - Tool automatically detects "Something went wrong" notifications
+  - Displays 
+    - Response Status (e.g., 422) 
+    - Response Data (e.g., `{"error":"\"campus\" must be a string"}`)
+  - Takes screenshot of error modal (`{action}-api-error-modal.png`)
+  - Offers manual takeover or skips merge polling if declined
+  - Fix the template field causing validation errors and rerun
 - Browser issues: close other browsers; check AV/permissions; ensure resources such as RAM and CPU are available
 - No sections/courses: tool exits gracefully; ensure data and merges are available
 - Conflict modals: tool captures and handles them; check `{action}-conflictModal.png`
