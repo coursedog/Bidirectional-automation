@@ -78,22 +78,26 @@ async function signIn(page, email, password, productSlug, env) {
 async function dismissReleaseNotesPopup(page) {
   try {
     console.log('🔍 Checking for release notes popup...');
-    await page.waitForTimeout(2000);
     
-    const releaseNotesPopup = page.locator('#popupCloseBtn, [data-testid="popup-close-btn-icon"]').first();
-    const popupVisible = await releaseNotesPopup.isVisible().catch(() => false);
+    // Target the button container instead of the SVG icon
+    // Use waitFor with timeout to actually wait for popup to appear
+    const releaseNotesPopup = page.locator('#popupClosePanel, #popupCloseBtn, [data-testid="popup-close-btn-icon"]').first();
     
-    if (popupVisible) {
-      console.log('📋 Release notes popup detected, dismissing...');
-      await releaseNotesPopup.click();
-      await page.waitForTimeout(500);
-      console.log('✅ Release notes popup dismissed');
-    } else {
-      console.log('✅ No release notes popup detected');
-    }
+    // Wait up to 3 seconds for the popup to appear
+    await releaseNotesPopup.waitFor({ state: 'visible', timeout: 3000 });
+    
+    // If we get here, popup is visible
+    console.log('📋 Release notes popup detected, dismissing...');
+    await releaseNotesPopup.click();
+    await page.waitForTimeout(500);
+    console.log('✅ Release notes popup dismissed');
   } catch (error) {
-    // Popup dismissal is not critical, continue if it fails
-    console.log('⚠️ Error checking for release notes popup:', error.message);
+    // Popup didn't appear within timeout - this is fine, continue
+    if (error.message.includes('Timeout')) {
+      console.log('✅ No release notes popup detected');
+    } else {
+      console.log('⚠️ Error checking for release notes popup:', error.message);
+    }
   }
 }
 

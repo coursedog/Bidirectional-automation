@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { offerUserTakeover, waitForUserResponseWithTimeout } = require('./userTakeover');
+const { checkForApiError } = require('./sectionTemplateFill');
 
 // Simple run-scoped logger that mirrors console output to Logs.md in the run folder
 function ensureRunLogger(outputDir) {
@@ -4288,6 +4289,13 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
         
         return false;
       }
+    }
+    
+    // Check for API error notification
+    const apiError = await checkForApiError(page, subfolder, browser, schoolId, 'course-save');
+    if (apiError) {
+      console.log('❌ API error detected, course save failed due to template issue');
+      return false;
     }
     
     console.log('✅ Course appears to have been saved successfully');

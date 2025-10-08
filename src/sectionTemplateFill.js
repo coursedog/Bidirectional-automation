@@ -1503,6 +1503,14 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
       } else {
         console.log('✅ No error detected after saving section.');
       }
+      
+      // Check for API error notification
+      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+      if (apiError) {
+        console.log('❌ API error detected, section save failed due to template issue');
+        return false;
+      }
+      
       console.log(`✅ Saved Section`);
       return true;
     } else {
@@ -2043,8 +2051,13 @@ async function ignoreDoubleBookings(page) {
 
 /**
  * Helper function to close instructor modal
+ * @param {Object} page - Playwright page object
+ * @param {Object} browser - Browser object (optional, for API error check)
+ * @param {string} schoolId - School identifier (optional, for API error check)
+ * @param {string} outputDir - Output directory (optional, for API error check)
+ * @param {string} action - Action being performed (optional, for API error check)
  */
-async function closeInstructorModal(page) {
+async function closeInstructorModal(page, browser = null, schoolId = null, outputDir = null, action = null) {
   console.log('   ┗ Closing instructor modal...');
   try {
     // Try clicking outside the modal first
@@ -2060,8 +2073,147 @@ async function closeInstructorModal(page) {
     }
     
     console.log('   ┗ Instructor modal closed successfully.');
+    
+    // Check for API error after closing modal (if parameters provided)
+    if (browser && schoolId && outputDir && action) {
+      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+      if (apiError) {
+        console.log('❌ API error detected after closing instructor modal');
+        return true; // Return true to indicate error was found
+      }
+    }
+    
+    return false; // Return false to indicate no error
   } catch (err) {
     console.log(`   ┗ Error closing instructor modal: ${err.message}`);
+    return false;
+  }
+}
+
+/**
+ * Check for API error notification after save and handle it
+ * @param {Page} page - Playwright page object
+ * @param {string} outputDir - Output directory for screenshots
+ * @param {Object} browser - Browser object for user takeover
+ * @param {string} schoolId - School identifier
+ * @param {string} action - Action being performed
+ * @returns {Promise<boolean>} - True if error was found and handled, false if no error
+ */
+async function checkForApiError(page, outputDir, browser, schoolId, action) {
+  try {
+    console.log('🔍 Checking for API error notification...');
+    await page.waitForTimeout(2000); // Wait 2 seconds for notification to appear
+    
+    const errorNotification = page.locator('div.notif.notif--error[data-test="apiErrorNotification"]');
+    const errorCount = await errorNotification.count();
+    
+    if (errorCount > 0 && await errorNotification.first().isVisible()) {
+      console.log('⚠️ API error notification detected!');
+      
+      // Click the details button to see more information
+      const detailsButton = errorNotification.locator('button.btn.btn-light.notif__details-btn');
+      if (await detailsButton.count() > 0) {
+        console.log('🔍 Clicking details button to view error information...');
+        await detailsButton.first().click();
+        await page.waitForTimeout(1500); // Wait for modal to appear
+        
+        // Look for the error details modal
+        const modalDialog = page.locator('.modal-dialog, [role="dialog"]');
+        if (await modalDialog.count() > 0 && await modalDialog.first().isVisible()) {
+          console.log('📋 Error details modal opened');
+          
+          // Take screenshot of the error modal
+          const errorModalScreenshot = path.join(outputDir, `${action}-api-error-modal.png`);
+          await page.screenshot({ path: errorModalScreenshot, fullPage: true });
+          console.log(`📸 Error modal screenshot saved to: ${errorModalScreenshot}`);
+          
+          // Extract error details from the modal
+          let responseStatus = 'Not found';
+          let responseData = 'Not found';
+          
+          try {
+            // Look for the textarea containing the error logs
+            const errorTextarea = page.locator('textarea.notif__logs, textarea.form-control.notif__logs').first();
+            if (await errorTextarea.count() > 0) {
+              // Try multiple methods to get the textarea content
+              let errorText = await errorTextarea.textContent().catch(() => '');
+              
+              // If textContent is empty, try inputValue
+              if (!errorText || errorText.trim() === '') {
+                errorText = await errorTextarea.inputValue().catch(() => '');
+              }
+              
+              // If still empty, try getting the value attribute
+              if (!errorText || errorText.trim() === '') {
+                errorText = await errorTextarea.getAttribute('value').catch(() => '');
+              }
+              
+              if (errorText && errorText.trim() !== '') {
+                console.log(`📋 Successfully extracted error text (${errorText.length} characters)`);
+                
+                // Extract Response Status
+                const statusMatch = errorText.match(/Response Status:\s*(\d+)/i);
+                if (statusMatch) {
+                  responseStatus = statusMatch[1];
+                }
+                
+                // Extract Response Data (everything after "Response Data:" up to end or next field)
+                const dataMatch = errorText.match(/Response Data:\s*(.+?)(?=\n[A-Z][a-z]+:|$)/is);
+                if (dataMatch) {
+                  responseData = dataMatch[1].trim();
+                }
+              } else {
+                console.log(`⚠️ Could not extract text from error textarea`);
+              }
+            }
+          } catch (err) {
+            console.log(`⚠️ Error extracting details from textarea: ${err.message}`);
+          }
+          
+          // Log the template issue
+          console.log('\n❌ ═══════════════════════════════════════════════════════');
+          console.log('❌ TEMPLATE ISSUE DETECTED');
+          console.log('❌ ═══════════════════════════════════════════════════════');
+          console.log(`Response Status: ${responseStatus}`);
+          console.log(`Response Data: ${responseData}`);
+          console.log('Please fix the error and try again.');
+          console.log('❌ ═══════════════════════════════════════════════════════\n');
+        }
+      }
+      
+      // Offer user takeover to fix the issue
+      if (browser && schoolId) {
+        const userResponse = await waitForUserResponseWithTimeout(5);
+        if (userResponse === 'yes') {
+          const takeoverResult = await offerUserTakeover(
+            page, 
+            browser, 
+            outputDir, 
+            'api-error', 
+            schoolId, 
+            action, 
+            'API error detected after save - template validation issue', 
+            null, 
+            true
+          );
+          if (takeoverResult.success) {
+            console.log('✅ User intervention successful - issue resolved');
+            return false; // Return false to indicate error was handled
+          }
+        }
+      }
+      
+      // User declined or timeout - return true to indicate error was found
+      console.log('⚠️ API error detected, skipping merge report polling');
+      return true;
+    }
+    
+    console.log('✅ No API error notification detected');
+    return false; // No error found
+    
+  } catch (error) {
+    console.log(`⚠️ Error while checking for API error notification: ${error.message}`);
+    return false; // Continue normally if check fails
   }
 }
 
@@ -2102,6 +2254,16 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
     await addProfBtn.first().click();
     console.log('➕ [Professors] Clicked add instructor button.');
     await page.waitForTimeout(7000); // Wait for modal to open
+    
+    // Check for API error immediately after opening instructor modal
+    if (browser && schoolId && outputDir) {
+      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+      if (apiError) {
+        console.log('❌ API error detected after opening instructor modal');
+        await closeInstructorModal(page); // Close modal without API check (already checked)
+        return false;
+      }
+    }
     
     // Check for "No instructors found." message
     const noInstructorsText = page.locator('.text-muted', { hasText: 'No instructors found.' });
@@ -2185,6 +2347,16 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
       if (toggleClicked) {
         await page.waitForTimeout(8000); // Wait for the instructor list to reload
         
+        // Check for API error immediately after the wait (while notification is still visible)
+        if (browser && schoolId && outputDir) {
+          const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+          if (apiError) {
+            console.log('❌ API error detected while loading instructors');
+            await closeInstructorModal(page); // Close modal without API check (already checked)
+            return false;
+          }
+        }
+        
         // Check if instructors are now available
         const instructorListUpdated = page.locator('.text-muted', { hasText: 'No instructors found.' });
         const stillNoInstructors = await instructorListUpdated.count() > 0 && await instructorListUpdated.first().isVisible();
@@ -2194,13 +2366,20 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
           // Continue with instructor selection - don't return here
         } else {
           console.log('   ┣ ⚠️ Still no instructors found even after toggling to all instructors');
-          // Close modal and return
-          await closeInstructorModal(page);
+          // Close modal and check for API error
+          const apiError = await closeInstructorModal(page, browser, schoolId, outputDir, action);
+          if (apiError) {
+            return false;
+          }
           return;
         }
       } else {
         console.log('   ┣ ⚠️ Could not find or click the all instructors toggle, closing modal');
-        await closeInstructorModal(page);
+        // Close modal and check for API error
+        const apiError = await closeInstructorModal(page, browser, schoolId, outputDir, action);
+        if (apiError) {
+          return false;
+        }
         return;
       }
     }
@@ -2398,10 +2577,28 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
             await closeBtn.first().click();
             console.log(`🚪 [Professors] Closed professor modal using: ${closeSelector}`);
             await page.waitForTimeout(1000);
+            
+            // Check for API error before returning
+            if (browser && schoolId && outputDir) {
+              const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+              if (apiError) {
+                console.log('❌ API error detected after closing professor modal');
+                return false;
+              }
+            }
             return; // Exit the function
           } catch (error) {
             continue;
           }
+        }
+      }
+      
+      // Check for API error before final return
+      if (browser && schoolId && outputDir) {
+        const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+        if (apiError) {
+          console.log('❌ API error detected, modal could not be closed');
+          return false;
         }
       }
       return; // Exit if modal couldn't be closed
@@ -2567,6 +2764,13 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
       await writeSectionDiff(effectiveBefore, afterValues, schoolId, outputDir, action, ts);
     } catch (err) {
       console.log(`⚠️ [Professors] Could not generate diff before save: ${err.message}`);
+    }
+    
+    // Check for API error notification before attempting to save
+    const apiErrorBeforeSave = await checkForApiError(page, outputDir, browser, schoolId, action);
+    if (apiErrorBeforeSave) {
+      console.log('❌ API error detected during professor setup, cannot save section');
+      return false;
     }
     
     console.log('💾 [Professors] Saving section after professor setup...');
@@ -4154,5 +4358,6 @@ module.exports = {
   relationshipsFill, 
   bannerEthosScheduleType,
   meetAndProfDetails,
-  ensureRunLogger
+  ensureRunLogger,
+  checkForApiError
 };

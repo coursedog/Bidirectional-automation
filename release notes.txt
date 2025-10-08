@@ -1,11 +1,12 @@
 ﻿Bi-directional Tester - Release Notes
-Date: 2025-10-07
+Date: 2025-10-08
 
 ===========================================
 Version 1.6.0 - October 2025
 ===========================================
 
 Highlights
+- Added automatic template issues detection and handling
 - Added comprehensive Merge settings validation for integration settings
 - Enhanced authentication with early error detection and clear error messages
 - Fixed critical bug in triple-nested credit fields (credits.creditHours.min/max)
@@ -14,6 +15,16 @@ Highlights
 - Significantly reduced "silent failures" through better validation and error handling
 
 New Features
+- Template issues validation (src/sectionTemplateFill.js, src/courseTemplateFill.js):
+  • Automatically detects and handles "Something went wrong" API error notifications
+  • Extracts Response Status and Response Data from error modal textarea. Example:
+      • Response Status: 422 
+      • Response Data: {"error":"\"campus\" must be a string"}
+  • Takes screenshots and displays formatted error details in console/Logs.md
+  • Checks for errors at 6 strategic points (instructor modal open, instructor search, modal close, before/after saves)
+  • Offers user takeover with 5-minute timeout or skips merge polling automatically
+  • Prevents cascading failures by catching errors early
+
 - Merge settings checks for integration settings (src/preflightChecks.js):
   • Validates real-time merges are enabled before running tests
   • Verifies "Should Coursedog send updates to the SIS?" setting is enabled
@@ -45,51 +56,22 @@ Improvements
 - More detailed logging for troubleshooting
 - Improved selector reliability for nested form fields
 - Enhanced resilience during long-running operations
+- Robust textarea content extraction with multiple fallback methods
+- Enhanced error context with action-specific messages
 
 Changed Files
 - src/preflightChecks.js (new)
+- src/sectionTemplateFill.js
+- src/courseTemplateFill.js
 - src/auth.js
 - src/index.js
-- src/courseTemplateFill.js
 - src/mergeReportPoller.js
 
 Stats
-- 5 files modified, 1 new file, ~350 insertions, ~50 deletions
+- 6 files modified, 1 new file, ~450 insertions, ~50 deletions
 
 Notes
 - No configuration changes required; existing workflows remain compatible
 - Merge settings checks run automatically; no user action needed
+- API errors are caught early with detailed error reporting and user intervention options
 - Error messages now provide clear guidance for resolving issues
-
-===========================================
-Version 1.5.5 - September 2025
-===========================================
-
-Highlights
-- Major updates to course template filling logic and field handling
-- Improved section template automation and screenshot capture reliability
-- Enhanced merge report polling with clearer progress and logging
-- Browser automation stability and timing refinements
-- Added integrated fields mapping file
-- Added logs file to run/test folders
-- Updated browser viewports to be responsive
-- Improved debug video aspect ratio
-- Improved differences report logic and visual
-
-Changed Files
-- src/browser.js
-- src/courseTemplateFill.js
-- src/getSchoolTemplate.js
-- src/index.js
-- src/mergeReportPoller.js
-- src/section-screenshot.js
-- src/sectionTemplateFill.js
-- src/userTakeover.js
-- src/integratedFields.json (new)
-
-Stats
-- 8 files modified, ~976 insertions, ~359 deletions vs origin/main
-
-Notes
-- No configuration changes required; run as usual via start scripts
-- If issues arise with template population or screenshots, check new logs under school run folders

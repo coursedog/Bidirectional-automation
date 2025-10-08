@@ -92,7 +92,6 @@ function getProductFolder(action) {
       // 4) Sign in
       try {
         await signIn(page, email, password, currentProductSlug, env);
-        await dismissReleaseNotesPopup(page);
       } catch (error) {
         console.error('\n❌', error.message);
         await browser.close();
@@ -100,6 +99,7 @@ function getProductFolder(action) {
       }
       // 5) Navigate into product
       await goToProduct(page, currentProductSlug, env);
+      await dismissReleaseNotesPopup(page);
 
       // Optional: hand control to computer-use agent if AGENT_MODE is set
       // if (process.env.AGENT_MODE === '1') {
@@ -164,7 +164,6 @@ function getProductFolder(action) {
       }
       try {
         await signIn(page, email, password, desiredSlug, env);
-        await dismissReleaseNotesPopup(page);
       } catch (error) {
         console.error('\n❌', error.message);
         await browser.close();
@@ -172,6 +171,7 @@ function getProductFolder(action) {
       }
       // 5) Navigate into product
       await goToProduct(page, desiredSlug, env);
+      await dismissReleaseNotesPopup(page);
 
       // Optional: hand control to computer-use agent if AGENT_MODE is set
       //if (process.env.AGENT_MODE === '1') {
