@@ -1767,6 +1767,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
     
     // Note: "before" screenshot moved to meetAndProfDetails()
     const modalContent = page.locator('[data-test="meeting-patterns-details-modal"]');
+    const meetingDialog = modalContent.locator('xpath=ancestor::div[contains(@class,"modal-dialog")]').first();
 
     await page.waitForTimeout(1000);
     // Check for ANY multiselect dropdown in the meeting pattern details modal
@@ -1788,7 +1789,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
     
 
     // Close the modal
-    const closeBtn = page.locator('button[data-test="close-modal-btn"]');
+    const closeBtn = meetingDialog.locator('button[data-test="close-modal-btn"]');
 
     // Save screenshot of the modal content instead of whole page
     await page.waitForTimeout(1000);
@@ -1810,16 +1811,13 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
         } else {
           console.log('⚠️ [Meeting Patterns] Close button not visible or enabled. Trying fallback methods...');
           
-          // Fallback 1: Try clicking outside the modal
-          try {
-            const body = page.locator('body');
-            await body.click({ position: { x: 10, y: 10 } });
+          const fallbackClose = meetingDialog.locator('button[aria-label="Close modal"]');
+          if (await fallbackClose.count() > 0) {
+            await fallbackClose.first().click();
             await page.waitForTimeout(500);
-            console.log('   ┗ "Set Details" modal closed via clicking outside.');
-          } catch (err) {
-            console.log(`   ┗ Error clicking outside modal: ${err.message}`);
-            
-            // Fallback 2: Try escape key
+            console.log('   ┗ "Set Details" modal closed via close icon.');
+          } else {
+            console.log(`   ┗ Close icon not available; trying escape key.`);
             try {
               await page.keyboard.press('Escape');
               await page.waitForTimeout(500);
@@ -1834,16 +1832,13 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
         console.log(`❌ [Meeting Patterns] Error closing modal: ${err.message}`);
         console.log('   ┗ Trying fallback methods...');
         
-        // Fallback: Try clicking outside the modal
-        try {
-          const body = page.locator('body');
-          await body.click({ position: { x: 10, y: 10 } });
+        const fallbackClose = meetingDialog.locator('button[aria-label="Close modal"]');
+        if (await fallbackClose.count() > 0) {
+          await fallbackClose.first().click();
           await page.waitForTimeout(500);
-          console.log('   ┗ "Set Details" modal closed via fallback (clicking outside).');
-        } catch (fallbackErr) {
-          console.log(`   ┗ Fallback also failed: ${fallbackErr.message}`);
-          
-          // Final fallback: Try escape key
+          console.log('   ┗ "Set Details" modal closed via fallback close icon.');
+        } else {
+          console.log(`   ┗ Close icon fallback also missing, trying escape key.`);
           try {
             await page.keyboard.press('Escape');
             await page.waitForTimeout(500);
@@ -1858,16 +1853,13 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
       console.log('⚠️ [Meeting Patterns] Could not find close button for "Set Details" modal.');
       console.log('   ┗ Trying fallback methods...');
       
-      // Fallback: Try clicking outside the modal
-      try {
-        const body = page.locator('body');
-        await body.click({ position: { x: 10, y: 10 } });
+      const fallbackClose = meetingDialog.locator('button[aria-label="Close modal"]');
+      if (await fallbackClose.count() > 0) {
+        await fallbackClose.first().click();
         await page.waitForTimeout(500);
-        console.log('   ┗ "Set Details" modal closed via fallback (clicking outside).');
-      } catch (err) {
-        console.log(`   ┗ Error clicking outside modal: ${err.message}`);
-        
-        // Final fallback: Try escape key
+        console.log('   ┗ "Set Details" modal closed via fallback close icon.');
+      } else {
+        console.log(`   ┗ Close icon fallback missing, trying escape key.`);
         try {
           await page.keyboard.press('Escape');
           await page.waitForTimeout(500);
@@ -2026,12 +2018,25 @@ async function ignoreDoubleBookings(page) {
       await closeBtn.first().click();
       await page.waitForTimeout(1000);
       await page.waitForSelector('[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => {});
-      console.log('   ✅ Modal closed successfully.');
+      console.log('   ✅ Modal closed via footer successfully.');
     } else {
-      // Fallback: click outside modal
-      await page.click('body', { position: { x: 10, y: 10 } });
-      await page.waitForTimeout(1000);
-      console.log('   ✅ Modal closed via fallback method.');
+      const xClose = modal.locator('button[aria-label="Close modal"], button[data-test="close-x-btn"], button[data-test="closeby-x-btn"], .modal-header .close');
+      if (await xClose.count() > 0 && await xClose.first().isVisible()) {
+        await xClose.first().click();
+        await page.waitForTimeout(1000);
+        await page.waitForSelector('[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => {});
+        console.log('   ✅ Modal closed via header X successfully.');
+      } else {
+        // Fallback: overlay click, then escape
+        const overlay = page.locator('div.modal-dimness').last();
+        if (await overlay.count() > 0 && await overlay.first().isVisible()) {
+          try { await overlay.first().click(); await page.waitForTimeout(1000); } catch (_) {}
+          console.log('   ✅ Modal close attempted via overlay.');
+        } else {
+          try { await page.keyboard.press('Escape'); await page.waitForTimeout(1000); } catch (_) {}
+          console.log('   ✅ Modal close attempted via Escape.');
+        }
+      }
     }
     
     console.log('🎉 [Double Bookings] Ignore Double Bookings process completed successfully.');
@@ -2060,16 +2065,26 @@ async function ignoreDoubleBookings(page) {
 async function closeInstructorModal(page, browser = null, schoolId = null, outputDir = null, action = null) {
   console.log('   ┗ Closing instructor modal...');
   try {
-    // Try clicking outside the modal first
-    const body = page.locator('body');
-    await body.click({ position: { x: 10, y: 10 } });
-    await page.waitForTimeout(500);
-    
-    // If modal is still open, try escape key
-    const modalDialog = page.locator('.modal-dialog');
-    if (await modalDialog.count() > 0 && await modalDialog.first().isVisible()) {
-      await page.keyboard.press('Escape');
+    // Prefer scoped footer close, then header close, then overlay, then escape
+    const content = page.locator('[data-test="instructorsMetaDetailsModal"]');
+    const modalDialog = content.locator('xpath=ancestor::div[contains(@class,"modal-dialog")]').first();
+    const footerClose = modalDialog.locator('.modal-footer button[data-test="close-modal-btn"]');
+    if (await footerClose.count() > 0 && await footerClose.first().isVisible()) {
+      await footerClose.first().click();
       await page.waitForTimeout(500);
+    } else {
+      const xClose = modalDialog.locator('button[aria-label="Close modal"], button[data-test="close-x-btn"], button[data-test="closeby-x-btn"], .modal-header .close');
+      if (await xClose.count() > 0 && await xClose.first().isVisible()) {
+        await xClose.first().click();
+        await page.waitForTimeout(500);
+      } else {
+        const overlay = page.locator('div.modal-dimness').last();
+        if (await overlay.count() > 0 && await overlay.first().isVisible()) {
+          try { await overlay.first().click(); await page.waitForTimeout(500); } catch (_) {}
+        } else {
+          try { await page.keyboard.press('Escape'); await page.waitForTimeout(500); } catch (_) {}
+        }
+      }
     }
     
     console.log('   ┗ Instructor modal closed successfully.');
@@ -2790,6 +2805,17 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
  */
 async function meetAndProfDetails(page, outputDir, action) {
   try {
+    const sectionModalSelector = '#section-modal-editor';
+    const logSectionModalState = async (context) => {
+      try {
+        const modal = page.locator(sectionModalSelector).first();
+        const visible = await modal.isVisible().catch(() => false);
+        console.log(`📌 [${context}] Section modal visible after close attempt? ${visible}`);
+      } catch (err) {
+        console.log(`📌 [${context}] Section modal visibility check failed: ${err.message}`);
+      }
+    };
+
     // Meeting Patterns Details
     console.log('🔎 [Details] Locating Meeting Patterns & Rooms section for details screenshot...');
     const meetingPatternSection = page.locator('[data-card-id="times"]');
@@ -2804,15 +2830,26 @@ async function meetAndProfDetails(page, outputDir, action) {
       const mpBeforePath = path.join(outputDir, 'MeetingPattern-Details-Before.png');
       try { await modalContent.screenshot({ path: mpBeforePath }); console.log(`✅ Saved: ${mpBeforePath}`); } catch (_) {}
       // Close modal
-      const closeBtn = page.locator('button[data-test="close-modal-btn"]');
-      if (await closeBtn.count() > 0 && await closeBtn.first().isVisible() && await closeBtn.first().isEnabled()) {
-        await closeBtn.first().click();
+    const closeBtn = modalContent.locator('button[data-test="close-modal-btn"]');
+    if (await closeBtn.count() > 0 && await closeBtn.first().isVisible() && await closeBtn.first().isEnabled()) {
+      await closeBtn.first().click();
+      await page.waitForTimeout(500);
+      await logSectionModalState('MeetingDetails');
+    } else {
+      // Fallback close
+      console.log('⚠️ [Meeting Patterns] Primary close button missing, trying scoped fallbacks...');
+      const dialog = modalContent.locator('xpath=ancestor::div[contains(@class,"modal-dialog")]').first();
+      const fallbackClose = dialog.locator('button[aria-label="Close modal"], button[data-test="close-x-btn"]');
+      if (await fallbackClose.count() > 0 && await fallbackClose.first().isVisible()) {
+        await fallbackClose.first().click();
         await page.waitForTimeout(500);
+        console.log('   ┗ "Set Details" modal closed via fallback icon.');
       } else {
-        // Fallback close
-        try { await page.locator('body').click({ position: { x: 10, y: 10 } }); await page.waitForTimeout(300); } catch (_) {}
-        try { await page.keyboard.press('Escape'); await page.waitForTimeout(300); } catch (_) {}
+        console.log('   ┗ No scoped close icon found, attempting Escape key.');
+        try { await page.keyboard.press('Escape'); await page.waitForTimeout(500); } catch (_) {}
       }
+      await logSectionModalState('MeetingDetails');
+    }
     } else {
       console.log('ℹ️ [Details] Meeting Patterns details button not found.');
     }
@@ -2823,27 +2860,46 @@ async function meetAndProfDetails(page, outputDir, action) {
     const openDetailsBtn = page.locator('button[data-test="openInstructorsMetaDetailsModal"]');
     if (await openDetailsBtn.count() > 0 && await openDetailsBtn.first().isVisible()) {
       await openDetailsBtn.first().click();
-      const modal = page.locator('div.modal-dialog');
+      const modalContent = page.locator('[data-test="instructorsMetaDetailsModal"]');
+      const modal = modalContent.locator('xpath=ancestor::div[contains(@class,"modal-dialog")]').first();
       const detailsModal = modal.locator('h3.app-heading', { hasText: 'Set Instructor Roles & Details' });
       await detailsModal.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
       await page.waitForTimeout(500);
       // Expand accordion if present
       const profDetails = modal.locator('span.btn.btn-dark.pl-0.py-3.font-weight-bold.text-capitalize');
       try { if (await profDetails.count() > 0 && await profDetails.first().isVisible()) { await profDetails.first().click(); await page.waitForTimeout(300); } } catch (_) {}
-      const modalContent = page.locator('[data-test="instructorsMetaDetailsModal"]');
+      // modalContent already declared above
       const instrBeforePath = path.join(outputDir, 'section-Instructor-Details-Before.png');
       try { await modalContent.screenshot({ path: instrBeforePath }); console.log(`✅ Saved: ${instrBeforePath}`); } catch (_) {}
       // Close modal (prefer footer close)
-      const modalFooter = modal.locator('.modal-footer');
-      const closeBtn = modalFooter.locator('button[data-test="close-modal-btn"]');
-      if (await closeBtn.count() > 0 && await closeBtn.first().isVisible() && await closeBtn.first().isEnabled()) {
+      const closeBtn = modalContent.locator('.modal-footer button[data-test="close-modal-btn"]');
+      if (await closeBtn.count() > 0 && await closeBtn.first().isVisible()) {
+        console.log('   ┗ Found footer close button, clicking...');
         await closeBtn.first().click();
         await page.waitForTimeout(500);
         await page.waitForSelector('div[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => {});
+        await logSectionModalState('InstructorsDetails');
       } else {
         // Fallback close
-        try { await page.locator('body').click({ position: { x: 10, y: 10 } }); await page.waitForTimeout(300); } catch (_) {}
-        try { await page.keyboard.press('Escape'); await page.waitForTimeout(300); } catch (_) {}
+        console.log('⚠️ [Instructors] Footer close missing, trying scoped fallbacks...');
+        const fallbackClose = modal.locator('button[aria-label="Close modal"], button[data-test="close-x-btn"], button[data-test="closeby-x-btn"], .modal-header .close');
+        if (await fallbackClose.count() > 0 && await fallbackClose.first().isVisible()) {
+          await fallbackClose.first().click();
+          await page.waitForTimeout(500);
+          console.log('   ┗ Instructor modal closed via fallback icon.');
+        } else {
+          // Try overlay click as a last resort, then escape
+          const overlay = page.locator('div.modal-dimness').last();
+          if (await overlay.count() > 0 && await overlay.first().isVisible()) {
+            console.log('   ┗ No icon found; attempting overlay click to close topmost modal.');
+            try { await overlay.first().click(); await page.waitForTimeout(500); } catch (_) {}
+          } else {
+            console.log('   ┗ Overlay not present; attempting Escape key.');
+            try { await page.keyboard.press('Escape'); await page.waitForTimeout(500); } catch (_) {}
+          }
+        }
+        await page.waitForSelector('div[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => {});
+        await logSectionModalState('InstructorsDetails');
       }
     } else {
       console.log('ℹ️ [Details] Instructor details button not found.');

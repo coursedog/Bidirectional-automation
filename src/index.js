@@ -264,9 +264,6 @@ function getProductFolder(action) {
         await captureModalBefore(page, subfolder, 'update');
         // Capture details "before" screenshots for Meeting Patterns & Instructor
         try { await meetAndProfDetails(page, subfolder, 'update'); } catch (_) {}
-        // Read all current values before filling
-        const beforeValues = await readSectionValues(page, schoolId);
-        console.log('\n📝 Saved original section values for comparing differences...');
         console.log('\n📝 Filling section template fields...');
         await fillBaselineTemplate(page, schoolId, 'update');
         // Call bannerEthosScheduleType for banner_ethos schools
@@ -274,7 +271,7 @@ function getProductFolder(action) {
           await bannerEthosScheduleType(page);
         }
         await validateAndResetMeetingPatterns(page, subfolder, 'update');
-        let saveSuccess = await validateAndResetProfessors(page, subfolder, 'update', browser, schoolId, beforeValues, dateStr);
+        let saveSuccess = await validateAndResetProfessors(page, subfolder, 'update', browser, schoolId, null, dateStr);
         
         // Log the save result
         if (saveSuccess) {
