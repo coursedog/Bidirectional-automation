@@ -129,42 +129,20 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
     }
     
     console.log('');
-    console.log('📋 MANUAL INTERVENTION INSTRUCTIONS:');
-    console.log('');
-    console.log('1. 👀 CHECK: The browser window should now be visible');
-    console.log('   (If not, click on the browser icon in your taskbar)');
-    console.log('');
-    console.log('2. 🔧 FIX THE ISSUE that caused the automation to fail:');
-    console.log(`   • ${errorMessage}`);
-    console.log('   • Look for validation errors, missing fields, or UI issues');
-    console.log('   • Fill in any required information');
-    console.log('   • The session and all data are preserved!');
-    console.log('');
-    console.log('3. 🔄 ALTERNATIVE: If the issue cannot be fixed, you can:');
-    console.log('   • Navigate to a different section/course to test instead');
-    console.log('   • The system will detect the change and restart the template process');
-    console.log('');
-         console.log('4. 💾 SAVE your changes using the appropriate save button');
-     console.log('');
-     console.log('5. ✅ After saving, return to this terminal and press Enter to continue');
-     console.log('');
-     console.log('🛑 ABORT OPTION: If you cannot fix the issue and want to skip this test:');
-     console.log('   • Come back to this terminal window');
-     console.log('   • Press ESC or C to abort and skip this test');
-     console.log('   • The error will be logged and automation will continue');
-     console.log('');
-     console.log('⏰ TIMEOUT: You have 5 minutes to complete the intervention');
-     console.log('   If no response is received, automation will skip this step and continue');
-     console.log('');
-     console.log('⚠️  IMPORTANT: Do NOT close the browser - press Enter in this terminal when done!');
-    console.log('═══════════════════════════════════════════════════');
+    console.log('📋 MANUAL INTERVENTION');
+    console.log('───────────────────────────────────────');
+    console.log('Work directly in the browser:');
+    console.log(`- Fix the issue: ${errorMessage}`);
+    console.log('- Click Save');
+    console.log('Then return to this terminal and press Enter to resume automation.');
+    console.log('(If you don\'t see the browser window, click it in your taskbar.)');
+    console.log('⚠️ Do NOT close the browser window.');
     
     // User chose to take over - browser is now visible for manual intervention
     console.log('\n🎯 MANUAL INTERVENTION ACTIVE');
     console.log('───────────────────────────────────────');
-    console.log('✅ Browser is now visible for manual intervention');
-    console.log('🔄 User can work directly in the browser to fix the issue');
-    console.log('📋 When finished, user should return to terminal and press Enter to continue\n');
+    console.log('✅ Fix the issue in the browser and click Save');
+    console.log('↩️ Return here and press Enter to resume automation\n');
     
     // Wait for user to confirm completion
     const interventionResponse = await waitForUserInputWithTimeout(5); // 5 minutes timeout
@@ -364,7 +342,7 @@ async function waitForUserInputWithTimeout(timeoutMinutes) {
   return new Promise((resolve) => {
     const timeoutMs = timeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
     
-    console.log(`\n🤝 Press Enter when you have completed the manual intervention...`);
+    console.log(`\n🤝 After you fix the issue and click Save, press Enter to resume automation...`);
     console.log(`🛑 Press ESC or C to abort and skip this test`);
     console.log(`⏰ (Timeout: ${timeoutMinutes} minutes - will auto-skip if no response)`);
     
