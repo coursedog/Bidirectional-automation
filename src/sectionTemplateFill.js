@@ -609,12 +609,8 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
       // Locate the wrapper by data-test attribute
       const wrapper = page.locator(`[data-test="${qid}"]`);
       const wrapperCount = await wrapper.count();
-      //console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-      //console.log(`🔎 [${qid}] Found ${wrapperCount} wrapper(s)`);
-      if (wrapperCount > 0) {
-        const html = await wrapper.first().evaluate(el => el.outerHTML);
-        //console.log(`🧩 [${qid}] Wrapper HTML:`, html);
-      }
+      // Note: Avoid evaluating wrapper HTML here. After selecting fields like Part Of Term,
+      // the form can re-render and cause this to silently auto-wait, creating long pauses.
       if (wrapperCount === 0) {
         console.log(`⚠️  [${qid}] No control found, skipping.`);
         continue;
@@ -656,6 +652,31 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
           continue;
         }
         
+        const isPlaceholderOptionText = (text) => {
+          const t = (text || '').toLowerCase().trim();
+          // Empty or whitespace-only
+          if (!t || t.length === 0) return true;
+          return (
+            t.includes('no elements found') ||
+            t.includes('list is empty') ||
+            t.includes('consider changing') ||
+            t.includes('no results') ||
+            t.includes('no elements') ||
+            t.includes('type to search') ||
+            t.includes('no departments found') ||
+            t.includes('no rooms found') ||
+            t.includes('no instructors found') ||
+            t.includes('no options') ||
+            t.includes('loading') ||
+            t.includes('searching') ||
+            t.startsWith('type ') ||
+            t.startsWith('search ') ||
+            t.startsWith('enter ') ||
+            t === 'no data' ||
+            t === 'none'
+          );
+        };
+
         // Handle multiselect: click to open and pick the first visible, unselected option
         console.log(`🔽 Processing multiselect for ${qid}`);
         try {
@@ -669,7 +690,13 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
             let hasVisibleCandidate = false;
             for (let i = 0; i < existingCount; i++) {
               try {
-                if (await existingCandidates.nth(i).isVisible()) { hasVisibleCandidate = true; break; }
+                const cand = existingCandidates.nth(i);
+                if (!(await cand.isVisible().catch(() => false))) continue;
+                const txt = ((await cand.textContent().catch(() => '')) || '').trim();
+                if (!txt) continue;
+                if (isPlaceholderOptionText(txt)) continue;
+                hasVisibleCandidate = true;
+                break;
               } catch (_) {}
             }
 
@@ -852,10 +879,41 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
             !spanClass.includes('option--selected')
           ) {
             try {
-              await option.click();
-              console.log(`✅ Selected option #${i+1} for multiselect ${qid}`);
-              selected = true;
-              break;
+              // Skip placeholder/empty options that do not actually select a value
+              const optText = ((await option.textContent().catch(() => '')) || '').trim();
+              if (!optText || isPlaceholderOptionText(optText)) {
+                continue;
+              }
+              // vue-multiselect attaches handlers to the inner .multiselect__option; clicking <li> can be unreliable
+              const clickable = option.locator('.multiselect__option, span').first();
+              if (await clickable.count() > 0) {
+                await clickable.click();
+              } else {
+                await option.click();
+              }
+              await page.waitForTimeout(500);
+              let nowHasValue = await hasSelectedValue(wrapper);
+              // Retry check once more after additional wait (UI can be slow)
+              if (!nowHasValue) {
+                await page.waitForTimeout(400);
+                nowHasValue = await hasSelectedValue(wrapper);
+              }
+              if (nowHasValue) {
+                console.log(`✅ Selected option #${i+1} for multiselect ${qid}`);
+                selected = true;
+                // If this is a trigger field (partOfTerm, campus), wait for form to settle
+                if (['partOfTerm', 'campus', 'college'].includes(qid)) {
+                  console.log(`   ┗ ⏳ Waiting for form to settle after ${qid} selection...`);
+                  await page.waitForTimeout(1500);
+                }
+                break;
+              } else {
+                console.log(`⚠️  Clicked option #${i+1} for multiselect ${qid}, but no value was selected. Trying next...`);
+                try {
+                  await wrapper.click();
+                  await page.waitForTimeout(300);
+                } catch (_) {}
+              }
             } catch (err) {
               console.log(`❌ Couldn't select option #${i+1} for multiselect ${qid}, trying next. Reason: ${err.message}`);
               continue;
@@ -901,11 +959,40 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                   !spanClass.includes('option--selected')
                 ) {
                   try {
-                    await option.click();
-                    console.log(`✅ Selected option #${i+1} for multiselect ${qid} (on retry attempt ${attempt + 1})`);
-                    selected = true;
-                    found = true;
-                    break;
+                    const optText = ((await option.textContent().catch(() => '')) || '').trim();
+                    if (!optText || isPlaceholderOptionText(optText)) {
+                      continue;
+                    }
+                    const clickable = option.locator('.multiselect__option, span').first();
+                    if (await clickable.count() > 0) {
+                      await clickable.click();
+                    } else {
+                      await option.click();
+                    }
+                    await page.waitForTimeout(500);
+                    let nowHasValue = await hasSelectedValue(wrapper);
+                    // Retry check once more
+                    if (!nowHasValue) {
+                      await page.waitForTimeout(400);
+                      nowHasValue = await hasSelectedValue(wrapper);
+                    }
+                    if (nowHasValue) {
+                      console.log(`✅ Selected option #${i+1} for multiselect ${qid} (on retry attempt ${attempt + 1})`);
+                      selected = true;
+                      found = true;
+                      // If this is a trigger field (partOfTerm, campus), wait for form to settle
+                      if (['partOfTerm', 'campus', 'college'].includes(qid)) {
+                        console.log(`   ┗ ⏳ Waiting for form to settle after ${qid} selection...`);
+                        await page.waitForTimeout(1500);
+                      }
+                      break;
+                    } else {
+                      console.log(`⚠️  Clicked option #${i+1} for multiselect ${qid} (retry), but no value was selected. Trying next...`);
+                      try {
+                        await wrapper.click();
+                        await page.waitForTimeout(300);
+                      } catch (_) {}
+                    }
                   } catch (err) {
                     console.log(`❌ Couldn't select option #${i+1} for multiselect ${qid} (on retry), trying next. Reason: ${err.message}`);
                     continue;
@@ -914,8 +1001,71 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               }
               if (selected) break;
             } else {
-              // Last attempt, print and skip
-              console.log(`🚫 Multiselect for ${qid} has options, but none are visible/selectable. Option texts: [${optionTexts.join(', ')}] Skipping.`);
+              // Last attempt - try typing fallback for async multiselects before giving up
+              console.log(`🔎 [${qid}] No selectable options found, trying typing fallback...`);
+              const multiInput = wrapper.locator('input.multiselect__input, input[type="text"]').first();
+              if (await multiInput.count() > 0) {
+                const placeholderText = ((await multiInput.getAttribute('placeholder')) || '').toLowerCase();
+                const shouldType = placeholderText.includes('type') || placeholderText.includes('search');
+                if (shouldType) {
+                  const letters = ['a', 'e', 'i', 'o', 'u', 'm', 's', 'd', 'c', 'p'];
+                  for (const ch of letters) {
+                    try {
+                      // Re-open dropdown if needed
+                      try { await wrapper.click(); } catch (_) {}
+                      await page.waitForTimeout(300);
+                      await multiInput.fill(ch);
+                      console.log(`   ┣ Typed '${ch}' for ${qid}...`);
+                    } catch (_) { continue; }
+                    await page.waitForTimeout(1500);
+
+                    const optionsAfterType = wrapper.locator('.multiselect__content-wrapper li:not([style*="display: none"]), [role="option"]:not([aria-disabled="true"])');
+                    const countAfterType = await optionsAfterType.count();
+                    const limit = Math.min(countAfterType, 15);
+                    let picked = false;
+                    for (let j = 0; j < limit; j++) {
+                      const opt = optionsAfterType.nth(j);
+                      const visible = await opt.isVisible().catch(() => false);
+                      if (!visible) continue;
+                      const txt = ((await opt.textContent().catch(() => '')) || '').trim();
+                      if (!txt || isPlaceholderOptionText(txt)) continue;
+                      // Click the inner span/option
+                      const clickable = opt.locator('.multiselect__option, span').first();
+                      try {
+                        if (await clickable.count() > 0) {
+                          await clickable.click();
+                        } else {
+                          await opt.click();
+                        }
+                      } catch (_) {
+                        await opt.click().catch(() => {});
+                      }
+                      picked = true;
+                      break;
+                    }
+
+                    if (picked) {
+                      await page.waitForTimeout(800);
+                      let nowHasValue = await hasSelectedValue(wrapper);
+                      if (!nowHasValue) {
+                        await page.waitForTimeout(500);
+                        nowHasValue = await hasSelectedValue(wrapper);
+                      }
+                      if (nowHasValue) {
+                        console.log(`   ┗ ✅ Selected option for ${qid} via typing fallback (typed '${ch}')`);
+                        selected = true;
+                        break;
+                      }
+                    }
+
+                    try { await multiInput.fill(''); } catch (_) {}
+                    await page.waitForTimeout(200);
+                  }
+                }
+              }
+              if (!selected) {
+                console.log(`🚫 Multiselect for ${qid} has options, but none are visible/selectable. Option texts: [${optionTexts.join(', ')}] Skipping.`);
+              }
             }
             attempt++;
           }
@@ -1174,8 +1324,8 @@ async function preFillRequiredEmptySectionFields(page) {
       // Multiselect/select-like
       if (cls.includes('multiselect') || role === 'combobox' || role === 'listbox') {
         try {
-          await selectDropdownIfEmpty(el, 'Required field');
-          return true;
+          const selected = await selectDropdownIfEmpty(el, 'Required field');
+          return !!selected;
         } catch (_) {}
       }
 
@@ -1261,43 +1411,84 @@ async function preFillRequiredEmptySectionFields(page) {
       return false;
     };
 
-    const requiredLabels = page.locator('label:has(.badge.badge-danger), label:has-text("required")');
-    const count = await requiredLabels.count();
     let filled = 0;
 
-    for (let i = 0; i < count; i++) {
-      const label = requiredLabels.nth(i);
-      const forAttr = await label.getAttribute('for');
-
-      let control = null;
-      if (forAttr) {
-        control = await getFirstUsable([
-          `#${forAttr}`,
-          `#${forAttr} input`,
-          `#${forAttr} select`,
-          `#${forAttr} textarea`,
-          `#${forAttr} .multiselect`,
-          `#${forAttr} [role="combobox"]`,
-          `#${forAttr} [role="listbox"]`
-        ]);
-      }
-
-      if (!control) {
-        control = await getFirstUsable([
-          'xpath=following::*[self::input or self::select or self::textarea or contains(@class, "multiselect") or @role="combobox" or @role="listbox"][1]'
-        ]);
-      }
-
-      if (!control) continue;
-
-      // Identify closest data-test wrapper to respect protections
-      let qid = null;
+    const isRequiredBadge = async (badge) => {
       try {
-        const wrapperWithDataTest = control.locator('xpath=ancestor-or-self::*[@data-test][1]').first();
-        if ((await wrapperWithDataTest.count()) > 0) {
-          qid = await wrapperWithDataTest.getAttribute('data-test');
+        const txt = ((await badge.textContent()) || '').trim().toLowerCase();
+        return txt.includes('required');
+      } catch (_) {}
+      return false;
+    };
+
+    const getFieldWrapperFromBadgeOrLabel = (nodeLocator) => {
+      // Matches both standard wrappers and dynamic-field wrappers like:
+      // <div id="field-department" class="field-wrapper ...">...</div>
+      return nodeLocator.locator('xpath=ancestor::*[(contains(@class,"field-wrapper") or starts-with(@id,"field-"))][1]').first();
+    };
+
+    const getControlFromFieldWrapper = async (fieldWrapper) => {
+      try {
+        // Prefer a control that carries the real qid in data-test (e.g., div.multiselect[data-test="department"])
+        const multiWithQid = fieldWrapper.locator('.multiselect[data-test], [class*="multiselect"][data-test]').first();
+        if ((await multiWithQid.count()) > 0) return multiWithQid;
+
+        const multi = fieldWrapper.locator('.multiselect, [class*="multiselect"]').first();
+        if ((await multi.count()) > 0) return multi;
+
+        const roleCtl = fieldWrapper.locator('[role="combobox"], [role="listbox"]').first();
+        if ((await roleCtl.count()) > 0) return roleCtl;
+
+        const input = fieldWrapper.locator('input, textarea, select').first();
+        if ((await input.count()) > 0) return input;
+      } catch (_) {}
+      return null;
+    };
+
+    const inferQid = async (fieldWrapper, control) => {
+      try {
+        const direct = (await control.getAttribute('data-test')) || '';
+        if (direct && direct !== 'badge' && direct !== 'dynamic-field') return direct;
+      } catch (_) {}
+      try {
+        const id = (await fieldWrapper.getAttribute('id')) || '';
+        if (id.startsWith('field-') && id.length > 'field-'.length) {
+          return id.slice('field-'.length);
         }
       } catch (_) {}
+      return null;
+    };
+
+    const wrappersToProcess = [];
+
+    // Collect from required badges (covers Demarcated Fields)
+    try {
+      const requiredBadges = page.locator('.badge.badge-danger');
+      const badgeCount = await requiredBadges.count();
+      for (let i = 0; i < badgeCount; i++) {
+        const badge = requiredBadges.nth(i);
+        if (!(await isRequiredBadge(badge))) continue;
+        const fw = getFieldWrapperFromBadgeOrLabel(badge);
+        if ((await fw.count()) > 0) wrappersToProcess.push(fw);
+      }
+    } catch (_) {}
+
+    // Collect from required labels (legacy, but useful for some UIs)
+    try {
+      const requiredLabels = page.locator('label:has(.badge.badge-danger)');
+      const labelCount = await requiredLabels.count();
+      for (let i = 0; i < labelCount; i++) {
+        const label = requiredLabels.nth(i);
+        const fw = getFieldWrapperFromBadgeOrLabel(label);
+        if ((await fw.count()) > 0) wrappersToProcess.push(fw);
+      }
+    } catch (_) {}
+
+    for (const fieldWrapper of wrappersToProcess) {
+      const control = await getControlFromFieldWrapper(fieldWrapper);
+      if (!control) continue;
+
+      const qid = await inferQid(fieldWrapper, control);
       if (qid && protectedQids.has(qid)) {
         console.log(`   ┗ ⏭️ [Sections] Prefill skip for protected field: ${qid}`);
         continue;
@@ -2825,8 +3016,23 @@ async function meetAndProfDetails(page, outputDir, action) {
       await setDetailsBtn.first().click();
       const detailsModalTitle = page.locator('.app-heading', { hasText: 'Meeting Patterns Additional Information' });
       await detailsModalTitle.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
-      await page.waitForTimeout(500);
+      
+      // Wait for actual modal content to load (form fields, not just title)
       const modalContent = page.locator('[data-test="meeting-patterns-details-modal"]');
+      console.log('⏳ [Details] Waiting for Meeting Patterns modal content to load...');
+      
+      // Try to wait for form elements inside the modal (multiselects, inputs, labels, etc.)
+      const modalFormElements = modalContent.locator('.multiselect, input, .form-element, .auto-form-row, label');
+      try {
+        await modalFormElements.first().waitFor({ state: 'visible', timeout: 8000 });
+        console.log('✅ [Details] Modal content loaded.');
+      } catch (_) {
+        console.log('⚠️ [Details] Could not detect form elements in modal, proceeding anyway...');
+      }
+      
+      // Additional buffer for async field data
+      await page.waitForTimeout(2000);
+      
       const mpBeforePath = path.join(outputDir, 'MeetingPattern-Details-Before.png');
       try { await modalContent.screenshot({ path: mpBeforePath }); console.log(`✅ Saved: ${mpBeforePath}`); } catch (_) {}
       // Close modal
@@ -2864,11 +3070,24 @@ async function meetAndProfDetails(page, outputDir, action) {
       const modal = modalContent.locator('xpath=ancestor::div[contains(@class,"modal-dialog")]').first();
       const detailsModal = modal.locator('h3.app-heading', { hasText: 'Set Instructor Roles & Details' });
       await detailsModal.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {});
-      await page.waitForTimeout(500);
+      
+      // Wait for actual modal content to load (form fields, not just title)
+      console.log('⏳ [Details] Waiting for Instructor modal content to load...');
+      const modalFormElements = modalContent.locator('.multiselect, input, .form-element, .auto-form-row, label');
+      try {
+        await modalFormElements.first().waitFor({ state: 'visible', timeout: 8000 });
+        console.log('✅ [Details] Instructor modal content loaded.');
+      } catch (_) {
+        console.log('⚠️ [Details] Could not detect form elements in instructor modal, proceeding anyway...');
+      }
+      
       // Expand accordion if present
       const profDetails = modal.locator('span.btn.btn-dark.pl-0.py-3.font-weight-bold.text-capitalize');
       try { if (await profDetails.count() > 0 && await profDetails.first().isVisible()) { await profDetails.first().click(); await page.waitForTimeout(300); } } catch (_) {}
-      // modalContent already declared above
+      
+      // Additional buffer for async field data
+      await page.waitForTimeout(2000);
+      
       const instrBeforePath = path.join(outputDir, 'section-Instructor-Details-Before.png');
       try { await modalContent.screenshot({ path: instrBeforePath }); console.log(`✅ Saved: ${instrBeforePath}`); } catch (_) {}
       // Close modal (prefer footer close)
@@ -3284,28 +3503,27 @@ async function bannerEthosScheduleType(page) {
  */
 async function hasSelectedValue(dropdown) {
   try {
-    // Check for selected value in multiselect (look for selected tag)
+    // Primary: vue-multiselect selected value shows up as a tag or a single-value pill.
+    // (Do NOT rely on placeholder visibility or input text; those can be true while the menu is open.)
     const selectedTag = dropdown.locator('.multiselect__tag, .multiselect__single');
     if (await selectedTag.count() > 0) {
-      const tagText = await selectedTag.first().textContent();
-      return tagText && tagText.trim().length > 0;
+      const tagText = (await selectedTag.first().textContent() || '').trim();
+      if (!tagText || tagText.length === 0) return false;
+      // Filter out common placeholder patterns
+      const lowerText = tagText.toLowerCase();
+      if (
+        lowerText.startsWith('set ') ||
+        lowerText.startsWith('select') ||
+        lowerText.includes('type to search') ||
+        lowerText.includes('click to select') ||
+        lowerText === 'none' ||
+        lowerText === 'n/a'
+      ) {
+        return false;
+      }
+      return true;
     }
-    
-    // Check for placeholder text change (some dropdowns change placeholder when selected)
-    const placeholder = dropdown.locator('.multiselect__placeholder');
-    if (await placeholder.count() > 0) {
-      const isVisible = await placeholder.first().isVisible();
-      // If placeholder is not visible, it likely means something is selected
-      return !isVisible;
-    }
-    
-    // Check for input value
-    const input = dropdown.locator('input');
-    if (await input.count() > 0) {
-      const inputValue = await input.first().inputValue();
-      return inputValue && inputValue.trim().length > 0;
-    }
-    
+
     return false;
   } catch (error) {
     console.log(`   ┗ Error checking dropdown value: ${error.message}`);
@@ -3363,25 +3581,228 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
     
     // Try to select the first option
     const searchContext = context || dropdown.page();
-    const firstOption = searchContext.locator('.multiselect_content_wrapper .multiselect_element:not([style*="display: none"])').first();
-    if (await firstOption.count() > 0 && await firstOption.isVisible()) {
-      await firstOption.click();
-      console.log(`   ┗ Successfully selected first option for ${dropdownName}`);
-      return true;
-    } else {
-      // Fallback: try using keyboard navigation
-      const multiInput = dropdown.locator('input.multiselect__input');
-      if (await multiInput.count() > 0) {
-        await multiInput.first().press('ArrowDown');
-        await dropdown.page().waitForTimeout(200);
-        await multiInput.first().press('Enter');
-        console.log(`   ┗ Successfully selected option for ${dropdownName} (keyboard fallback)`);
-        return true;
-      } else {
-        console.log(`   ┗ No options found for ${dropdownName}`);
-        return false;
+    const options = searchContext.locator(
+      '.multiselect_content_wrapper .multiselect_element:not([style*="display: none"]), ' +
+      '.multiselect__content-wrapper li:not([style*="display: none"]), ' +
+      '[role="option"]:not([aria-disabled="true"])'
+    );
+    const optionCount = await options.count();
+    let clicked = false;
+
+    const isPlaceholderOption = (text) => {
+      const t = (text || '').toLowerCase().trim();
+      // Empty or whitespace-only
+      if (!t || t.length === 0) return true;
+      return (
+        t.includes('type to search') ||
+        t.includes('no elements found') ||
+        t.includes('list is empty') ||
+        t.includes('consider changing') ||
+        t.includes('no results') ||
+        t.includes('no departments found') ||
+        t.includes('no rooms found') ||
+        t.includes('no instructors found') ||
+        t.includes('no options') ||
+        t.includes('loading') ||
+        t.includes('searching') ||
+        t.startsWith('type ') ||
+        t.startsWith('search ') ||
+        t.startsWith('enter ') ||
+        t === 'no data' ||
+        t === 'none'
+      );
+    };
+
+    let clickedOpt = null;
+    if (optionCount > 0) {
+      const limit = Math.min(optionCount, 10);
+      for (let i = 0; i < limit; i++) {
+        const opt = options.nth(i);
+        const visible = await opt.isVisible().catch(() => false);
+        if (!visible) continue;
+        const txt = ((await opt.textContent().catch(() => '')) || '').trim();
+        if (!txt) continue;
+        if (isPlaceholderOption(txt)) continue;
+        // Click the inner .multiselect__option span (vue-multiselect attaches handlers there)
+        const clickable = opt.locator('.multiselect__option, span').first();
+        try {
+          if (await clickable.count() > 0) {
+            await clickable.click();
+          } else {
+            await opt.click();
+          }
+        } catch (_) {
+          await opt.click().catch(() => {});
+        }
+        clicked = true;
+        clickedOpt = opt;
+        break;
       }
     }
+
+    if (clicked) {
+      await dropdown.page().waitForTimeout(600);
+      let nowHasValue = await hasSelectedValue(dropdown);
+      // Retry check once more after additional wait
+      if (!nowHasValue) {
+        await dropdown.page().waitForTimeout(400);
+        nowHasValue = await hasSelectedValue(dropdown);
+      }
+      // Retry click if still no value
+      if (!nowHasValue && clickedOpt) {
+        try {
+          const clickable = clickedOpt.locator('.multiselect__option, span').first();
+          if (await clickable.count() > 0) {
+            await clickable.click();
+          } else {
+            await clickedOpt.click();
+          }
+          await dropdown.page().waitForTimeout(600);
+          nowHasValue = await hasSelectedValue(dropdown);
+        } catch (_) {}
+      }
+      if (nowHasValue) {
+        console.log(`   ┗ Successfully selected first option for ${dropdownName}`);
+        return true;
+      }
+      console.log(`   ┗ Clicked an option for ${dropdownName}, but no value appeared selected.`);
+      // fall through to typing fallback
+      clicked = false;
+    } else {
+      // fall through to typing fallback
+    }
+
+    // Typing fallback: many Ethos multiselects require typing before real options appear
+    console.log(`   ┃ Entering typing fallback for ${dropdownName}...`);
+    try {
+      const multiInput = dropdown.locator('input.multiselect__input, input[type="text"]').first();
+      const multiInputCount = await multiInput.count();
+      console.log(`   ┃ Found ${multiInputCount} multiInput element(s)`);
+      if (multiInputCount > 0) {
+        // Ensure input is focusable (vue-multiselect often starts with width:0px until clicked)
+        try {
+          const style = (await multiInput.getAttribute('style')) || '';
+          if (style.includes('width: 0px')) {
+            try { await dropdown.click({ force: true }); } catch (_) {}
+            await dropdown.page().waitForTimeout(200);
+          }
+        } catch (_) {}
+
+        const placeholderText = ((await multiInput.getAttribute('placeholder')) || '').toLowerCase();
+        const shouldType = placeholderText.includes('type') || placeholderText.includes('search');
+        console.log(`   ┃ Placeholder: "${placeholderText}", shouldType: ${shouldType}`);
+        if (shouldType) {
+          const letters = ['a', 'e', 'i', 'o', 'u', 'm', 's', 'd', 'c', 'p'];
+          for (const ch of letters) {
+            console.log(`   ┃ Typing '${ch}' for ${dropdownName}...`);
+            try {
+              // Re-click to open dropdown if needed
+              try { await dropdown.click({ force: true }); } catch (_) {}
+              await dropdown.page().waitForTimeout(300);
+              await multiInput.fill(ch);
+            } catch (fillErr) {
+              console.log(`   ┃ Fill failed for '${ch}': ${fillErr.message}`);
+              continue;
+            }
+            await dropdown.page().waitForTimeout(1500);
+
+            const optionsAfterType = searchContext.locator(
+              '.multiselect_content_wrapper .multiselect_element:not([style*="display: none"]), ' +
+              '.multiselect__content-wrapper li:not([style*="display: none"]), ' +
+              '[role="option"]:not([aria-disabled="true"])'
+            );
+            const countAfterType = await optionsAfterType.count();
+            console.log(`   ┃ After typing '${ch}', found ${countAfterType} options`);
+            const limit = Math.min(countAfterType, 15);
+            let picked = false;
+            let clickedOpt = null;
+            for (let i = 0; i < limit; i++) {
+              const opt = optionsAfterType.nth(i);
+              const visible = await opt.isVisible().catch(() => false);
+              if (!visible) continue;
+              const txt = ((await opt.textContent().catch(() => '')) || '').trim();
+              if (!txt) continue;
+              if (isPlaceholderOption(txt)) {
+                console.log(`   ┃ Skipping placeholder option: "${txt.substring(0, 40)}..."`);
+                continue;
+              }
+              console.log(`   ┃ Clicking option: "${txt.substring(0, 40)}..."`);
+              // Click the inner .multiselect__option span (vue-multiselect attaches handlers there)
+              const clickable = opt.locator('.multiselect__option, span').first();
+              try {
+                if (await clickable.count() > 0) {
+                  await clickable.click();
+                } else {
+                  await opt.click();
+                }
+              } catch (_) {
+                await opt.click().catch(() => {});
+              }
+              picked = true;
+              clickedOpt = opt;
+              break;
+            }
+
+            if (picked) {
+              await dropdown.page().waitForTimeout(800);
+              let nowHasValue = await hasSelectedValue(dropdown);
+              console.log(`   ┃ After click, hasSelectedValue: ${nowHasValue}`);
+              // Retry check with additional wait if needed
+              if (!nowHasValue) {
+                await dropdown.page().waitForTimeout(500);
+                nowHasValue = await hasSelectedValue(dropdown);
+              }
+              // Retry click once more if still no value
+              if (!nowHasValue && clickedOpt) {
+                console.log(`   ┃ Retrying click...`);
+                try {
+                  const clickable = clickedOpt.locator('.multiselect__option, span').first();
+                  if (await clickable.count() > 0) {
+                    await clickable.click();
+                  } else {
+                    await clickedOpt.click();
+                  }
+                  await dropdown.page().waitForTimeout(800);
+                  nowHasValue = await hasSelectedValue(dropdown);
+                } catch (_) {}
+              }
+              if (nowHasValue) {
+                console.log(`   ┗ Successfully selected option for ${dropdownName} (typed '${ch}')`);
+                return true;
+              }
+            }
+
+            try { await multiInput.fill(''); } catch (_) {}
+            await dropdown.page().waitForTimeout(200);
+          }
+        } else {
+          console.log(`   ┃ Placeholder doesn't require typing, skipping typing fallback`);
+        }
+      } else {
+        console.log(`   ┃ No multiInput found for typing fallback`);
+      }
+    } catch (typingErr) {
+      console.log(`   ┃ Typing fallback error: ${typingErr.message}`);
+    }
+
+    // Final fallback: try using keyboard navigation
+    const multiInput = dropdown.locator('input.multiselect__input');
+    if (await multiInput.count() > 0) {
+      await multiInput.first().press('ArrowDown');
+      await dropdown.page().waitForTimeout(200);
+      await multiInput.first().press('Enter');
+      await dropdown.page().waitForTimeout(300);
+      const nowHasValue = await hasSelectedValue(dropdown);
+      if (nowHasValue) {
+        console.log(`   ┗ Successfully selected option for ${dropdownName} (keyboard fallback)`);
+        return true;
+      }
+      console.log(`   ┗ Keyboard fallback attempted for ${dropdownName}, but no value appeared selected.`);
+      return false;
+    }
+
+    console.log(`   ┗ No selectable options found for ${dropdownName}`);
+    return false;
   } catch (error) {
     console.log(`   ┗ Error selecting dropdown ${dropdownName}: ${error.message}`);
     return false;

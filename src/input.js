@@ -18,6 +18,10 @@ function gatherInputs() {
   const hasSavedCreds = Boolean(previous.email && previous.password);
   let step = hasSavedCreds ? 'product' : 'email';
   let inputs = {};
+  let courseFormName = 'Propose New Course';
+  let programFormName = 'Propose New Program';
+  let formPromptQueue = [];
+  let currentFormPrompt = null;
 
   if (hasSavedCreds) {
     inputs.email = previous.email;
@@ -107,11 +111,17 @@ function gatherInputs() {
       step = 'action';
 
     } else if (step === 'action') {
+      const isPeopleSoftSchool = typeof inputs.schoolId === 'string' && inputs.schoolId.includes('_peoplesoft');
       if (inputs.prodChoice === '3') {
-        // Both products selected - action already set to 'both', skip action selection
-        step = 'formName';
+        inputs.action = 'both';
+        formPromptQueue = determineFormPromptQueue(inputs.action, inputs.prodChoice, isPeopleSoftSchool);
+        currentFormPrompt = formPromptQueue.shift();
+        if (currentFormPrompt) {
+          step = 'formName';
+          continue;
+        }
+        break;
       } else if (inputs.prodChoice === '1') {
-        // Academic Scheduling actions
         console.log('\nSelect Test Case:');
         console.log('  1) Update Existing Section');
         console.log('  2) Create New Section Including Meeting and Professor');
@@ -141,27 +151,32 @@ function gatherInputs() {
         else if (actionChoice === '6') inputs.action = 'inactivateSection';
         else if (actionChoice === '7') inputs.action = 'all';
         
-        // Academic Scheduling doesn't need form name, break out
         break;
         
       } else if (inputs.prodChoice === '2') {
-        // Curriculum Management actions
         console.log('\nSelect Test Case:');
         console.log('  1) Update Course through Direct Edit');
         console.log('  2) Inactivate a Course');
         console.log('  3) Update Effective Start Date (New Revision)');
         console.log('  4) Propose New Course');
-        console.log('  5) All of the Above');
+        if (isPeopleSoftSchool) {
+          console.log('  5) Update Program (PeopleSoft only)');
+          console.log('  6) Propose New Program (PeopleSoft only)');
+          console.log('  7) All of the Above');
+        } else {
+          console.log('  5) All of the Above');
+        }
         
-        let actionChoice = prompt('Enter number [1-5] (or b to go back): ').trim();
+        const validChoices = ['1','2','3','4'].concat(isPeopleSoftSchool ? ['5','6','7'] : ['5']);
+        let actionChoice = prompt(`Enter number [${validChoices.join('-')}] (or b to go back): `).trim();
         
         if (actionChoice.toLowerCase() === 'back' || actionChoice.toLowerCase() === 'b') {
           step = 'schoolId';
           continue;
         }
         
-        if (!['1','2','3','4','5'].includes(actionChoice)) {
-          console.log('  ↳ Invalid. Please enter 1, 2, 3, 4, or 5.');
+        if (!validChoices.includes(actionChoice)) {
+          console.log(`  ↳ Invalid. Please enter one of: ${validChoices.join(', ')}.`);
           continue;
         }
         
@@ -169,56 +184,67 @@ function gatherInputs() {
         else if (actionChoice === '2') inputs.action = 'inactivateCourse';
         else if (actionChoice === '3') inputs.action = 'newCourseRevision';
         else if (actionChoice === '4') inputs.action = 'createCourse';
-        else if (actionChoice === '5') inputs.action = 'courseAll';
+        else if (isPeopleSoftSchool && actionChoice === '5') inputs.action = 'updateProgram';
+        else if (isPeopleSoftSchool && actionChoice === '6') inputs.action = 'createProgram';
+        else inputs.action = 'courseAll';
         
-        // Check if we need to ask for form name (actions 4, 5)
-        if (actionChoice === '4' || actionChoice === '5') {
+        formPromptQueue = determineFormPromptQueue(inputs.action, inputs.prodChoice, isPeopleSoftSchool);
+        currentFormPrompt = formPromptQueue.shift();
+        if (currentFormPrompt) {
           step = 'formName';
-        } else {
-          // Actions 1, 2, 3 don't need form name, break out
-          break;
-        }
-      }
-      
-      // If we're not at formName step, break out
-      if (step !== 'formName') {
-        break;
-      }
-
-    } else if (step === 'formName') {
-      console.log(`\n📝 What is ${inputs.schoolId}'s Form Name for Course Creation:`);
-      console.log('  You have 2 options:');
-      console.log('  1) Enter a custom form name');
-      console.log('  2) Press Enter to use default: "Propose New Course"');
-      console.log('  💡 Recommendation: Press Enter now to use default immediately');
-      
-      try {
-        // Get user input
-        const userInput = prompt('Form Name (or press Enter for default): ');
-        
-        if (userInput.toLowerCase() === 'back' || userInput.toLowerCase() === 'b') {
-          step = 'action';
           continue;
         }
         
-        // If no form name entered, use default
-        if (!userInput.trim()) {
-          formName = 'Propose New Course';
-          console.log('  ↳ Using default form name: "Propose New Course"');
-        } else {
-          formName = userInput.trim();
-          console.log(`  ↳ Using custom form name: "${formName}"`);
+        break;
+      }
+
+      break;
+
+    } else if (step === 'formName') {
+      if (!currentFormPrompt) {
+        break;
+      }
+      const formLabel = currentFormPrompt === 'program' ? 'Program' : 'Course';
+      const defaultFormName = currentFormPrompt === 'program' ? 'Propose New Program' : 'Propose New Course';
+      console.log(`\n📝 What is ${inputs.schoolId}'s Form Name for ${formLabel} Creation:`);
+      console.log('  You have 2 options:');
+      console.log('  1) Enter a custom form name');
+      console.log(`  2) Press Enter to use default: "${defaultFormName}"`);
+      console.log('  💡 Recommendation: Press Enter now to use default immediately');
+      
+      try {
+        const userInput = prompt('Form Name (or press Enter for default): ');
+        if (userInput.toLowerCase() === 'back' || userInput.toLowerCase() === 'b') {
+          step = 'action';
+          formPromptQueue.unshift(currentFormPrompt);
+          currentFormPrompt = null;
+          continue;
         }
-        
-        inputs.formName = formName;
-        break;
-        
+        const chosenName = userInput.trim() || defaultFormName;
+        console.log(`  ↳ Using ${userInput.trim() ? 'custom' : 'default'} form name: "${chosenName}"`);
+        if (currentFormPrompt === 'program') {
+          programFormName = chosenName;
+        } else {
+          courseFormName = chosenName;
+        }
+        if (formPromptQueue.length > 0) {
+          currentFormPrompt = formPromptQueue.shift();
+        } else {
+          break;
+        }
       } catch (error) {
-        // If there's an error, use default
-        formName = 'Propose New Course';
-        console.log('  ↳ Using default form name: "Propose New Course"');
-        inputs.formName = formName;
-        break;
+        const chosenName = defaultFormName;
+        console.log(`  ↳ Using default form name: "${chosenName}"`);
+        if (currentFormPrompt === 'program') {
+          programFormName = chosenName;
+        } else {
+          courseFormName = chosenName;
+        }
+        if (formPromptQueue.length > 0) {
+          currentFormPrompt = formPromptQueue.shift();
+        } else {
+          break;
+        }
       }
     }
   }
@@ -243,8 +269,25 @@ function gatherInputs() {
     productSlug: inputs.productSlug, 
     schoolId: inputs.schoolId, 
     action: inputs.action,
-    formName: inputs.formName || 'Propose New Course' // Default if not set
+    courseFormName,
+    programFormName
   };
+}
+
+function determineFormPromptQueue(action, prodChoice, isPeopleSoftSchool) {
+  const queue = [];
+  if (action === 'createCourse') {
+    queue.push('course');
+  } else if (action === 'courseAll') {
+    queue.push('course');
+    if (isPeopleSoftSchool) queue.push('program');
+  } else if (action === 'both') {
+    queue.push('course');
+    if (isPeopleSoftSchool) queue.push('program');
+  } else if (action === 'createProgram') {
+    queue.push('program');
+  }
+  return queue;
 }
 
 module.exports = { gatherInputs }; 

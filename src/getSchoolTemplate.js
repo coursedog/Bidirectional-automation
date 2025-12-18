@@ -142,6 +142,76 @@ async function fetchCourseTemplate(token, schoolId, env) {
 }
 
 /**
+ * Fetches program template from API for PeopleSoft schools and saves to Resources folder
+ * @param {string} token - Bearer token from authentication
+ * @param {string} schoolId - School ID
+ * @param {string} env - Environment ('prd' or 'stg')
+ * @returns {Promise<void>}
+ */
+async function fetchProgramTemplate(token, schoolId, env) {
+  const baseUrl = env === 'prd' 
+    ? 'https://app.coursedog.com' 
+    : 'https://staging.coursedog.com';
+
+  const endpoints = [
+    `${baseUrl}/api/v1/${schoolId}/general/programTemplate`,
+    `${baseUrl}/api/v2/${schoolId}/general/programTemplate`
+  ];
+
+  const headers = {
+    'Authorization': `Bearer ${token}`,
+    'Accept': '*/*',
+    'Cache-Control': 'no-cache',
+    'Host': env === 'prd' ? 'app.coursedog.com' : 'staging.coursedog.com',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Cookie': `isLoggedIn=true; token=${token}`
+  };
+
+  let lastError = null;
+  for (const url of endpoints) {
+    try {
+      console.log(`📡 Fetching program template for school: ${schoolId}...`);
+      console.log(`🌐 API URL: ${url}`);
+      const response = await axios.get(url, { headers });
+      if (response.data) {
+        console.log('✅ Program template received successfully');
+        const resourcesDir = path.join(__dirname, 'Resources');
+        if (!fs.existsSync(resourcesDir)) {
+          console.log('📁 Creating Resources directory...');
+          fs.mkdirSync(resourcesDir, { recursive: true });
+        }
+
+        const now = new Date();
+        const pad = n => n.toString().padStart(2, '0');
+        const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+        const filename = `${schoolId}-programTemplate-${dateStr}.json`;
+        const filepath = path.join(resourcesDir, filename);
+
+        console.log(`💾 Saving template to: ${filepath}`);
+        fs.writeFileSync(filepath, JSON.stringify(response.data, null, 2));
+
+        console.log(`✅ Program template saved as: ${filename}`);
+        return;
+      }
+    } catch (error) {
+      lastError = error;
+      console.warn(`⚠️ Unable to fetch program template from ${url}: ${error.message}`);
+      if (error.response) {
+        console.warn(`Response status: ${error.response.status}`);
+      }
+      if (error.response?.status === 404) {
+        continue; // try next endpoint
+      }
+    }
+  }
+
+  if (lastError) {
+    throw new Error(`Failed to fetch program template: ${lastError.message}`);
+  }
+}
+
+/**
  * Authenticates with Coursedog API and returns a session token
  * @param {string} env - Environment ('prd' or 'stg')
  * @param {string} schoolId - School ID
@@ -180,6 +250,9 @@ async function getSchoolTemplate(env, schoolId) {
         // Fetch both section and course templates after successful authentication
         await fetchSectionTemplate(token, schoolId, env);
         await fetchCourseTemplate(token, schoolId, env);
+      if (schoolId.includes('_peoplesoft')) {
+        await fetchProgramTemplate(token, schoolId, env);
+      }
         
         return token;
       } else {

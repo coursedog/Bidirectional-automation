@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { offerUserTakeover, waitForUserResponseWithTimeout } = require('./userTakeover');
 const { checkForApiError } = require('./sectionTemplateFill');
+const { screenshotFormRoot } = require('./form-screenshot');
 
 // Simple run-scoped logger that mirrors console output to Logs.md in the run folder
 function ensureRunLogger(outputDir) {
@@ -417,7 +418,12 @@ async function createCourse(page, subfolder, schoolId, browser = null, formName 
     
     // Fill all form fields (no skip fields for creation)
     console.log('📋 Reading course template and filling all fields...');
-    await fillCourseTemplate(page, schoolId, 'createCourse');
+    global.__currentCourseContext = { browser, subfolder, schoolId, action: 'createCourse' };
+    try {
+      await fillCourseTemplate(page, schoolId, 'createCourse');
+    } finally {
+      global.__currentCourseContext = null;
+    }
     console.log('✅ Course template filled');
     
     // Special handling for colleague_ethos schools - fill Credit Hours Min field
@@ -437,12 +443,9 @@ async function createCourse(page, subfolder, schoolId, browser = null, formName 
     console.log('✅ Field differences saved');
     
     // Take screenshot of the form after changes
-    console.log('📸 Taking screenshot after changes...');
+    console.log('📸 Taking course form screenshot after changes...');
     const afterScreenshotPath = path.join(subfolder, `${schoolId}-createCourse-form-after.png`);
-    await page.screenshot({ 
-      path: afterScreenshotPath,
-      fullPage: true 
-    });
+    await screenshotCourseForm(page, afterScreenshotPath);
     console.log(`✅ After screenshot saved: ${afterScreenshotPath}`);
     
     // Attempt to save the course proposal
@@ -467,81 +470,8 @@ async function createCourse(page, subfolder, schoolId, browser = null, formName 
  * - Temporarily expands the browser viewport via CDP to fit the form height
  * - Clips precisely to the form bounding box using its scrollHeight
  */
-async function screenshotCourseForm(page, outputPath) {
-  try {
-    // Ensure containers are scrolled to the top for stable coordinates
-    await page.evaluate(() => {
-      try { window.scrollTo(0, 0); } catch (_) {}
-      try { const main = document.querySelector('main#main.content'); if (main) main.scrollTo(0, 0); } catch (_) {}
-      try { const content = document.querySelector('.content'); if (content) content.scrollTo(0, 0); } catch (_) {}
-    });
-
-    // Strong CSS to disable internal scrollbars and allow full height
-    let styleHandle = null;
-    try {
-      styleHandle = await page.addStyleTag({ content: `
-        /* Hide fixed chrome that can overlay */
-        [data-test="app-navigation"], header, nav.app-navbar, .app-navbar { visibility: hidden !important; }
-        /* Ensure main containers don't clip */
-        html, body, .content, main#main, #app { overflow: visible !important; height: auto !important; }
-        /* Make the course form expand fully */
-        form[data-test="course-form-wrapper"].auto-form { max-height: none !important; height: auto !important; overflow: visible !important; }
-        /* Nested auto-form wrappers inside cards should also expand */
-        [data-test="course-form-wrapper"].auto-form { max-height: none !important; height: auto !important; overflow: visible !important; }
-        .form-card, .card-body, .auto-form-row { max-height: none !important; height: auto !important; overflow: visible !important; }
-      `});
-      await page.waitForTimeout(100);
-    } catch (_) {}
-
-    // Target the top-level form element (not nested auto-form divs)
-    const formHandle = page.locator('form[data-test="course-form-wrapper"].auto-form').first();
-    await formHandle.waitFor({ state: 'visible', timeout: 30000 });
-
-    // Walk ancestor chain and disable overflow scroll to allow full layout expansion
-    await page.evaluate((formSelector) => {
-      const form = document.querySelector(formSelector);
-      if (!form) return;
-      let el = form;
-      while (el && el !== document.documentElement) {
-        try {
-          const cs = getComputedStyle(el);
-          if (/(auto|scroll)/i.test(cs.overflowY || '')) {
-            el.setAttribute('data-__orig-overflow-y', el.style.overflowY || '');
-            el.setAttribute('data-__orig-height', el.style.height || '');
-            el.setAttribute('data-__orig-max-height', el.style.maxHeight || '');
-            el.style.overflowY = 'visible';
-            el.style.height = 'auto';
-            el.style.maxHeight = 'none';
-          }
-        } catch (_) {}
-        el = el.parentElement;
-      }
-      // Ensure html/body expand
-      document.documentElement.style.height = 'auto';
-      document.body.style.height = 'auto';
-      // Nudge layout and force reflow
-      // Scroll through the form once to trigger any lazy content
-      try { form.scrollTo(0, form.scrollHeight); } catch (_) {}
-      try { form.scrollTo(0, 0); } catch (_) {}
-    }, 'form[data-test="course-form-wrapper"].auto-form');
-
-    // Let layout settle after CSS adjustments
-    await page.waitForTimeout(300);
-
-    // Prefer element screenshot so Playwright can stitch beyond viewport
-    await formHandle.screenshot({ path: outputPath });
-
-    // Remove custom CSS
-    try {
-      await page.evaluate((styleEl) => { try { styleEl && styleEl.remove && styleEl.remove(); } catch (_) {} }, styleHandle);
-    } catch (_) {}
-
-  } catch (err) {
-    // Fallback to full page if anything goes wrong
-    try {
-      await page.screenshot({ path: outputPath, fullPage: true });
-    } catch (_) {}
-  }
+async function screenshotCourseForm(page, outputPath, rootSelector = 'form[data-test="course-form-wrapper"].auto-form') {
+  return await screenshotFormRoot(page, outputPath, rootSelector);
 }
 
 /**
@@ -712,7 +642,12 @@ async function updateCourse(page, subfolder, schoolId, browser = null, action = 
     
     // Read course template and fill fields
     console.log('📋 Reading course template and filling fields...');
-    await fillCourseTemplate(page, schoolId, action);
+    global.__currentCourseContext = { browser, subfolder, schoolId, action };
+    try {
+      await fillCourseTemplate(page, schoolId, action);
+    } finally {
+      global.__currentCourseContext = null;
+    }
     console.log('✅ Course template filled');
     
     // Read course values after changes
@@ -2421,6 +2356,7 @@ async function fillYesNoField(page, fieldElement, value, question = null) {
 async function handleCourseStatusInactivation(page, question) {
   try {
     console.log(`🔄 [Inactivation] Processing status field for course inactivation...`);
+    const courseContext = global.__currentCourseContext || {};
     
     // Find the status field using the same strategies as regular fields
     let fieldElement = await findFieldElement(page, question);
@@ -2462,11 +2398,12 @@ async function handleCourseStatusInactivation(page, question) {
         }
         
         if (!foundInactive) {
-          console.log(`   ┗ ⚠️ Could not find inactive status option, selecting first available`);
-          const firstOption = options.first();
-          if (await firstOption.count() > 0) {
-            await firstOption.click();
+          console.log(`   ┗ ⚠️ Could not find inactive status option in dropdown`);
+          const manualSuccess = await promptManualStatusSelection(page, courseContext);
+          if (manualSuccess) {
+            return;
           }
+          throw new Error('Inactive status option not found and manual takeover could not be completed');
         }
       } catch (error) {
         console.log(`   ┗ ❌ Error setting status to inactive: ${error.message}`);
@@ -2485,6 +2422,45 @@ async function handleCourseStatusInactivation(page, question) {
   } catch (error) {
     console.log(`   ┗ ⚠️ Error in handleCourseStatusInactivation: ${error.message}`);
   }
+}
+
+/**
+ * Prompt manual takeover when automation can't choose the status option
+ */
+async function promptManualStatusSelection(page, context = {}) {
+  const { browser, subfolder, schoolId, action = 'inactivateCourse' } = context || {};
+
+  if (!browser || !subfolder || !schoolId) {
+    console.log('   ┗ ⚠️ Manual takeover unavailable (missing browser/subfolder/schoolId context)');
+    return false;
+  }
+
+  const userResponse = await waitForUserResponseWithTimeout(5);
+  if (userResponse !== 'yes') {
+    const reasonLabel = userResponse === 'timeout' ? 'timed out' : 'was declined';
+    console.log(`   ┗ ⚠️ Manual takeover ${reasonLabel} by user`);
+    return false;
+  }
+
+  const takeoverResult = await offerUserTakeover(
+    page,
+    browser,
+    subfolder,
+    'course-status',
+    schoolId,
+    action,
+    'Automation could not locate an "inactive" status option. Please select the correct status manually.',
+    null,
+    true
+  );
+
+  if (takeoverResult.success) {
+    console.log('   ┗ ✅ Manual takeover completed - status selection should now be set.');
+    return true;
+  }
+
+  console.log('   ┗ ⚠️ Manual takeover ended without resolving the status selection');
+  return false;
 }
 
 /**
@@ -3596,54 +3572,87 @@ async function preFillRequiredEmptyFields(page) {
       return false;
     };
 
-    const requiredLabels = page.locator('label:has(.badge.badge-danger), label:has-text("required")');
-    const count = await requiredLabels.count();
     let filled = 0;
 
-    for (let i = 0; i < count; i++) {
-      const label = requiredLabels.nth(i);
-      const forAttr = await label.getAttribute('for');
-
-      let control = null;
-      if (forAttr) {
-        control = await getFirstUsable([
-          `#${forAttr}`,
-          `#${forAttr} input`,
-          `#${forAttr} select`,
-          `#${forAttr} textarea`,
-          `#${forAttr} .multiselect`,
-          `#${forAttr} [role="combobox"]`,
-          `#${forAttr} [role="listbox"]`
-        ]);
-      }
-
-      if (!control) {
-        // Search nearby within the same container
-        control = await getFirstUsable([
-          'xpath=following::*[self::input or self::select or self::textarea or contains(@class, "multiselect") or @role="combobox" or @role="listbox"][1]'
-        ]);
-      }
-
-      if (!control) continue;
-
-      // Identify the closest data-test wrapper/qid to honor protected fields
-      let qid = null;
+    const isRequiredBadge = async (badge) => {
       try {
-        const wrapperWithDataTest = control.locator('xpath=ancestor-or-self::*[@data-test][1]').first();
-        if ((await wrapperWithDataTest.count()) > 0) {
-          qid = await wrapperWithDataTest.getAttribute('data-test');
+        const txt = ((await badge.textContent()) || '').trim().toLowerCase();
+        return txt.includes('required');
+      } catch (_) {}
+      return false;
+    };
+
+    const getFieldWrapperFromBadgeOrLabel = (nodeLocator) => {
+      return nodeLocator.locator('xpath=ancestor::*[(contains(@class,"field-wrapper") or starts-with(@id,"field-"))][1]').first();
+    };
+
+    const getControlFromFieldWrapper = async (fieldWrapper) => {
+      try {
+        const multiWithQid = fieldWrapper.locator('.multiselect[data-test], [class*="multiselect"][data-test]').first();
+        if ((await multiWithQid.count()) > 0) return multiWithQid;
+
+        const multi = fieldWrapper.locator('.multiselect, [class*="multiselect"]').first();
+        if ((await multi.count()) > 0) return multi;
+
+        const roleCtl = fieldWrapper.locator('[role="combobox"], [role="listbox"]').first();
+        if ((await roleCtl.count()) > 0) return roleCtl;
+
+        const input = fieldWrapper.locator('input, textarea, select').first();
+        if ((await input.count()) > 0) return input;
+      } catch (_) {}
+      return null;
+    };
+
+    const inferQid = async (fieldWrapper, control) => {
+      try {
+        const direct = (await control.getAttribute('data-test')) || '';
+        if (direct && direct !== 'badge' && direct !== 'dynamic-field') return direct;
+      } catch (_) {}
+      try {
+        const id = (await fieldWrapper.getAttribute('id')) || '';
+        if (id.startsWith('field-') && id.length > 'field-'.length) {
+          return id.slice('field-'.length);
         }
       } catch (_) {}
+      return null;
+    };
+
+    const wrappersToProcess = [];
+
+    try {
+      const requiredBadges = page.locator('.badge.badge-danger');
+      const badgeCount = await requiredBadges.count();
+      for (let i = 0; i < badgeCount; i++) {
+        const badge = requiredBadges.nth(i);
+        if (!(await isRequiredBadge(badge))) continue;
+        const fw = getFieldWrapperFromBadgeOrLabel(badge);
+        if ((await fw.count()) > 0) wrappersToProcess.push(fw);
+      }
+    } catch (_) {}
+
+    try {
+      const requiredLabels = page.locator('label:has(.badge.badge-danger)');
+      const labelCount = await requiredLabels.count();
+      for (let i = 0; i < labelCount; i++) {
+        const label = requiredLabels.nth(i);
+        const fw = getFieldWrapperFromBadgeOrLabel(label);
+        if ((await fw.count()) > 0) wrappersToProcess.push(fw);
+      }
+    } catch (_) {}
+
+    for (const fieldWrapper of wrappersToProcess) {
+      const control = await getControlFromFieldWrapper(fieldWrapper);
+      if (!control) continue;
+
+      const qid = await inferQid(fieldWrapper, control);
       if (qid && protectedQids.has(qid)) {
         console.log(`   ┗ ⏭️ Prefill skip for protected field: ${qid}`);
         continue;
       }
 
-      // Skip if it already has a value
       const empty = await controlIsEmpty(control);
       if (!empty) continue;
 
-      // Try to make visible if needed
       try { await control.scrollIntoViewIfNeeded(); } catch (_) {}
 
       try {
@@ -4334,5 +4343,6 @@ module.exports = {
   fillCourseTemplate,
   getLatestCourseTemplateFile,
   saveCourseFieldDifferences,
-  saveCourse
+  saveCourse,
+  screenshotCourseForm
 };

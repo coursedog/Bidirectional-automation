@@ -10,12 +10,17 @@ const axios = require('axios');
  * @returns {Promise<void>}
  * @throws {Error} If any validation fails
  */
+const programActions = ['createProgram', 'updateProgram'];
+
 async function performPreflightChecks(env, schoolId, token, productSlug, action) {
   const baseUrl = env === 'prd' 
     ? 'https://app.coursedog.com' 
     : 'https://staging.coursedog.com';
 
   console.log('\n🔍 Running Merge settings checks...');
+  if (programActions.includes(action) && !schoolId.includes('_peoplesoft')) {
+    throw new Error('Program actions are only supported for Peoplesoft schools (schoolId must include "_peoplesoft").');
+  }
   
   try {
     // Step 1: Get Integration Save State ID
@@ -122,6 +127,8 @@ async function validateMergeSettings(baseUrl, schoolId, token, saveStateId, prod
     await validateCourseMergeSettings(baseUrl, schoolId, token, saveStateId);
     await validateSectionMergeSettings(baseUrl, schoolId, token, saveStateId);
     await validateRelationshipMergeSettings(baseUrl, schoolId, token, saveStateId);
+  } else if (productSlug === 'cm/programs' || programActions.includes(action)) {
+    await validateProgramMergeSettings(baseUrl, schoolId, token, saveStateId);
   } else if (productSlug === 'cm/courses') {
     // Curriculum Management
     await validateCourseMergeSettings(baseUrl, schoolId, token, saveStateId);
@@ -148,6 +155,20 @@ async function validateCourseMergeSettings(baseUrl, schoolId, token, saveStateId
     saveStateId, 
     'coursesCm', 
     'Courses'
+  );
+}
+
+/**
+ * Validate Program (Curriculum Management) merge settings
+ */
+async function validateProgramMergeSettings(baseUrl, schoolId, token, saveStateId) {
+  await checkEntityMergeSettings(
+    baseUrl,
+    schoolId,
+    token,
+    saveStateId,
+    'programs',
+    'Programs'
   );
 }
 

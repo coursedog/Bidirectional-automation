@@ -20,7 +20,7 @@ async function appendRunSummary(runFolder, id, mergeReportURL, status, mergeRepo
     const summaryFilePath = path.join(runFolder, summaryFileName);
     
     // Determine product based on action
-    const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse'];
+    const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'createProgram', 'updateProgram'];
     const product = courseActions.includes(action) ? 'Curriculum Management' : 'Academic Scheduling';
     
     // Check if file exists, if not create with headers

@@ -30,6 +30,7 @@ This tool is actively evolving and may not work for every SIS. Validate results 
 - Ensure nightly merges for the school are not running, otherwise the flow will break.
     - The tool attempts to auto-detect if a nightly merge is in progress and will safely exit with a message; please rerun after merges complete.
 - For Curriculum Management: You MUST create a new form named 'Propose New Course' that uses the same Course Template and that is linked to an auto-approval workflow.
+- For Peoplesoft schools whose `schoolId` contains `_peoplesoft`: Program create/update test cases are only available for these schools, and they require a `Propose New Program` form (users are prompted before the flow starts). The automation also fetches the `programTemplate` from the API and stresses split ownership, department, and subplan requirements needed by PeopleSoft.
 - Do not log in to Coursedog while the application is running.
     - When the automation starts, it will log in to Coursedog with the provided user account and password. Logging into Coursedog in another browser will log your user off from the automation.
          - After completing bi-directional testing, open the relevant merge reports.
@@ -135,7 +136,7 @@ Prompts (staging only):
 - Email and password
 - Product: Academic Scheduling, Curriculum Management, or Both
 - School ID (e.g., `waynecc_colleague_ethos`)
-- Test case (see below) and, for Course creation, the form name (default: "Propose New Course")
+- Test case (see below) and, when available, the form name (Course creation defaults to "Propose New Course", Program creation defaults to "Propose New Program" on `_peoplesoft` schools)
 
 Tips:
 - Type `b` or `back` to go to the previous prompt where supported
@@ -155,7 +156,19 @@ Tips:
     - Inactivate Course, 
     - New Course Revision, 
     - Propose New Course, 
+    - Update Program (PeopleSoft only)
+    - Create Program (PeopleSoft only)
     - All
+
+### PeopleSoft Program Flows
+
+- Available only when the School ID contains `_peoplesoft`.
+- The CLI will prompt for the Program form name (default: `"Propose New Program"`); make sure that form exists and is linked to an auto-approval workflow.
+- The automation starts from `/#/cm/programs`, opens the form dropdown, submits the proposal, and then uses the cached `programTemplate` from the API to fill every field.
+- Additional PeopleSoft expectations enforced:
+  - Split Ownership is forced to **Yes**.
+  - Exactly two departments are selected and ownership percentages are balanced (50/50).
+  - At least one specialization (subplan) is created if none exists, and every field inside that subplan is populated before saving.
 - Both Products: runs all Academic Scheduling tests, then all Curriculum Management tests in one Run folder
 
 ---

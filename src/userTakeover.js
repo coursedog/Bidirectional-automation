@@ -266,53 +266,66 @@ function askUserToRetry(errorType, errorMessage) {
 async function waitForUserResponseWithTimeout(timeoutMinutes) {
   return new Promise((resolve) => {
     const timeoutMs = timeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
-    
+
     console.log(`\n🤝 Do you want to take manual control to fix this issue? [y/N]: `);
     console.log(`⏰ (Timeout: ${timeoutMinutes} minutes - will auto-skip if no response)`);
-    
-    // Set up timeout
-    const timeoutId = setTimeout(() => {
-      console.log(`\n⏰ ${timeoutMinutes} minute timeout reached!`);
-      resolve('timeout');
-    }, timeoutMs);
-    
-    // Set up input listener
+
     const stdin = process.stdin;
+    // If stdin isn't interactive, we can't reliably wait for user input.
+    if (!stdin || !stdin.isTTY || typeof stdin.setRawMode !== 'function') {
+      console.log(`⚠️  Manual control prompt skipped: stdin is not an interactive TTY for this run.`);
+      resolve('no');
+      return;
+    }
+
+    let timeoutId;
+    let inputBuffer = '';
+    const startedAt = Date.now();
+
+    const cleanupAndResolve = (result) => {
+      try { clearTimeout(timeoutId); } catch (_) {}
+      try { stdin.setRawMode(false); } catch (_) {}
+      try { stdin.pause(); } catch (_) {}
+      try { stdin.removeListener('data', onInput); } catch (_) {}
+      resolve(result);
+    };
+
+    // Set up timeout (with cleanup)
+    timeoutId = setTimeout(() => {
+      console.log(`\n⏰ ${timeoutMinutes} minute timeout reached!`);
+      cleanupAndResolve('timeout');
+    }, timeoutMs);
+
+    // Set up input listener
     stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding('utf8');
-    
-    let inputBuffer = '';
-    
+
     const onInput = (key) => {
       // Check for Ctrl+C to gracefully exit
       if (key === '\u0003') {
-        clearTimeout(timeoutId);
-        stdin.setRawMode(false);
-        stdin.pause();
-        stdin.removeListener('data', onInput);
         console.log('\n🛑 User interrupted with Ctrl+C');
-        resolve('timeout');
+        cleanupAndResolve('timeout');
         return;
       }
-      
+
       // Check for Enter key (ASCII 13 or \r)
-      if (key === '\r' || key === '\n' || key.charCodeAt(0) === 13) {
-        clearTimeout(timeoutId);
-        stdin.setRawMode(false);
-        stdin.pause();
-        stdin.removeListener('data', onInput);
-        
+      if (key === '\r' || key === '\n' || (key && key.charCodeAt && key.charCodeAt(0) === 13)) {
+        // Guard against buffered/newline artifacts that can arrive immediately on listener attach
+        if (inputBuffer.trim() === '' && Date.now() - startedAt < 500) {
+          return;
+        }
+
         const response = inputBuffer.toLowerCase().trim();
         if (response === 'y' || response === 'yes') {
-          resolve('yes');
+          cleanupAndResolve('yes');
         } else {
           // Default to 'no' for any other input including empty
-          resolve('no');
+          cleanupAndResolve('no');
         }
         return;
       }
-      
+
       // Handle backspace
       if (key === '\u007f' || key === '\u0008') {
         if (inputBuffer.length > 0) {
@@ -321,14 +334,14 @@ async function waitForUserResponseWithTimeout(timeoutMinutes) {
         }
         return;
       }
-      
+
       // Add printable characters to buffer and echo them
       if (key >= ' ' && key <= '~') {
         inputBuffer += key;
         process.stdout.write(key);
       }
     };
-    
+
     stdin.on('data', onInput);
   });
 }
@@ -346,14 +359,16 @@ async function waitForUserInputWithTimeout(timeoutMinutes) {
     console.log(`🛑 Press ESC or C to abort and skip this test`);
     console.log(`⏰ (Timeout: ${timeoutMinutes} minutes - will auto-skip if no response)`);
     
-    // Set up timeout
-    const timeoutId = setTimeout(() => {
-      console.log(`\n⏰ ${timeoutMinutes} minute timeout reached!`);
-      resolve('timeout');
-    }, timeoutMs);
-    
-    // Set up input listener
     const stdin = process.stdin;
+    // If stdin isn't interactive, we can't reliably wait for user input.
+    if (!stdin || !stdin.isTTY || typeof stdin.setRawMode !== 'function') {
+      console.log(`⚠️  Manual intervention wait skipped: stdin is not an interactive TTY for this run.`);
+      resolve('timeout');
+      return;
+    }
+
+    const startedAt = Date.now();
+    // Set up input listener
     stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding('utf8');
@@ -365,10 +380,18 @@ async function waitForUserInputWithTimeout(timeoutMinutes) {
       stdin.removeListener('data', onInput);
       resolve(result);
     };
+
+    // Set up timeout (with cleanup)
+    const timeoutId = setTimeout(() => {
+      console.log(`\n⏰ ${timeoutMinutes} minute timeout reached!`);
+      cleanupAndResolve('timeout');
+    }, timeoutMs);
     
     const onInput = (key) => {
       // Check for Enter key (ASCII 13 or \r)
       if (key === '\r' || key === '\n' || key.charCodeAt(0) === 13) {
+        // Guard against buffered/newline artifacts that can arrive immediately on listener attach
+        if (Date.now() - startedAt < 500) return;
         cleanupAndResolve('completed');
       }
       // Check for ESC key (ASCII 27)

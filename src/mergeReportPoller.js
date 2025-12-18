@@ -22,6 +22,9 @@ async function pollMergeReport(env, schoolId, act) {
   if (act === 'relationships' || act === 'editRelationships' || act === 'createRelationships') {
     apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=relationships`;
     console.log(`🔗 [Relationships] Using relationships entity type for ${act} action`);
+  } else if (act === 'createProgram' || act === 'updateProgram') {
+    apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=programs`;
+    console.log(`📚 [Programs] Using programs entity type for ${act} action`);
   } else if (act === 'updateCourse' || act === 'createCourse' || act === 'inactivateCourse' || act === 'newCourseRevision') {
     apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=coursesCm`;
     console.log(`📚 [Curriculum Management] Using coursesCm entity type for ${act} action`);

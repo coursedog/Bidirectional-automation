@@ -11,6 +11,7 @@ const { openSection, createSection, captureModalBefore, captureModalAfter } = re
 const { getSchoolTemplate } = require('./getSchoolTemplate');
 const { fillBaselineTemplate, saveSection, validateAndResetMeetingPatterns, validateAndResetProfessors, readSectionValues, relationshipsFill, bannerEthosScheduleType, meetAndProfDetails, ensureRunLogger } = require('./sectionTemplateFill');
 const { createCourse, updateCourse } = require('./courseTemplateFill');
+const { createProgram, updateProgram } = require('./programTemplateFill');
 const { startMergeReportPolling } = require('./mergeReportPoller');
 const { appendRunSummary, generateRunId } = require('./runSummary');
 const { performPreflightChecks } = require('./preflightChecks');
@@ -43,15 +44,23 @@ function ensureDebugVideoFolder() {
 
 // Helper function to determine product subfolder based on action
 function getProductFolder(action) {
-  const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse'];
-  return courseActions.includes(action) ? 'Curriculum Management' : 'Academic Scheduling';
+  const curriculumActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'createProgram', 'updateProgram'];
+  return curriculumActions.includes(action) ? 'Curriculum Management' : 'Academic Scheduling';
+}
+
+function getFormNameForAction(action, courseFormName, programFormName) {
+  if (action === 'createProgram') return programFormName;
+  if (action === 'createCourse') return courseFormName;
+  return null;
 }
 
 
 ;(async () => {
   try {
     // 0) Inputs
-    const { email, password, env, productSlug, schoolId, action, formName } = gatherInputs();
+    const { email, password, env, productSlug, schoolId, action, courseFormName, programFormName } = gatherInputs();
+    const programOnlyActions = ['createProgram', 'updateProgram'];
+    const actionProductSlug = programOnlyActions.includes(action) ? 'cm/programs' : productSlug;
 
     // Ensure schoolId folder exists
     const outputDir = await ensureSchoolFolder(schoolId);
@@ -65,7 +74,7 @@ function getProductFolder(action) {
 
     // 2) Pre-flight checks
     try {
-      await performPreflightChecks(env, schoolId, token, productSlug, action);
+      await performPreflightChecks(env, schoolId, token, actionProductSlug, action);
     } catch (error) {
       // Pre-flight check failed - error message already displayed, exit gracefully
       process.exit(1);
@@ -81,8 +90,14 @@ function getProductFolder(action) {
       await seedContext(ctx, baseDomain, email, schoolId);
       
       // Determine the correct product slug based on the action
-      const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse'];
-      let currentProductSlug = courseActions.includes(act) ? 'cm/courses' : 'sm/section-dashboard';
+      const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'courseAll'];
+      const programActions = ['updateProgram', 'createProgram'];
+      let currentProductSlug = 'sm/section-dashboard';
+      if (programActions.includes(act)) {
+        currentProductSlug = 'cm/programs';
+      } else if (courseActions.includes(act)) {
+        currentProductSlug = 'cm/courses';
+      }
 
       // For update and inactivateSection, navigate with enrollment=0 filter from the start
       if (act === 'update' || act === 'inactivateSection') {
@@ -142,7 +157,8 @@ function getProductFolder(action) {
       const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       
       // Continue with the same logic as runFlow but using the shared run folder
-      await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, formName);
+      const actionFormName = getFormNameForAction(act, courseFormName, programFormName);
+      await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, actionFormName);
     }
 
     // Helper to run a single flow, including browser setup/teardown
@@ -159,7 +175,13 @@ function getProductFolder(action) {
       await seedContext(ctx, baseDomain, email, schoolId);
       // 4) Sign in
       let desiredSlug = productSlug;
-      if (act === 'update' || act === 'inactivateSection') {
+      const courseOnlyActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'courseAll'];
+      const programActions = ['updateProgram', 'createProgram'];
+      if (programActions.includes(act)) {
+        desiredSlug = 'cm/programs';
+      } else if (courseOnlyActions.includes(act)) {
+        desiredSlug = 'cm/courses';
+      } else if (act === 'update' || act === 'inactivateSection') {
         desiredSlug = 'sm/section-dashboard';
       }
       try {
@@ -221,7 +243,8 @@ function getProductFolder(action) {
       try { ensureRunLogger(subfolder); } catch (_) {}
 
       // Execute the action
-      await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, formName);
+      const actionFormName = getFormNameForAction(act, courseFormName, programFormName);
+      await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, actionFormName);
     }
 
     // Helper function to log failed runs to summary
@@ -405,7 +428,26 @@ function getProductFolder(action) {
           const runFolder = path.dirname(subfolder);
           await logFailedRun(runFolder, act, schoolId, `Course update error: ${error.message}`);
         }
-        
+      } else if (act === 'updateProgram') {
+        await console.log('\n📚 Initiating Program update process...');
+        try {
+          const success = await updateProgram(page, subfolder, schoolId, browser);
+          await browser.close();
+          
+          if (success) {
+            console.log('✅ Program update completed successfully');
+            await startMergeReportPolling(env, schoolId, act, subfolder);
+          } else {
+            console.log('❌ Program update process failed');
+            const runFolder = path.dirname(subfolder);
+            await logFailedRun(runFolder, act, schoolId, 'Program update process failed');
+          }
+        } catch (error) {
+          console.log(`❌ [UpdateProgram] ${error.message}`);
+          await browser.close();
+          const runFolder = path.dirname(subfolder);
+          await logFailedRun(runFolder, act, schoolId, `Program update error: ${error.message}`);
+        }
       } else if (act === 'inactivateCourse') {
         await console.log('\n📚 Initiating Course inactivation process...');
         try {
@@ -426,7 +468,6 @@ function getProductFolder(action) {
           const runFolder = path.dirname(subfolder);
           await logFailedRun(runFolder, act, schoolId, `Course inactivation error: ${error.message}`);
         }
-        
       } else if (act === 'newCourseRevision') {
         await console.log('\n📚 Initiating Course revision process...');
         try {
@@ -448,7 +489,6 @@ function getProductFolder(action) {
           const runFolder = path.dirname(subfolder);
           await logFailedRun(runFolder, act, schoolId, `Course revision error: ${error.message}`);
         }
-        
       } else if (act === 'createCourse') {
         await console.log('\n📚 Initiating Course creation process...');
         try {
@@ -469,6 +509,26 @@ function getProductFolder(action) {
           
           const runFolder = path.dirname(subfolder);
           await logFailedRun(runFolder, act, schoolId, `Course creation error: ${error.message}`);
+        }
+      } else if (act === 'createProgram') {
+        await console.log('\n📚 Initiating Program creation process...');
+        try {
+          const success = await createProgram(page, subfolder, schoolId, browser, formName);
+          await browser.close();
+          
+          if (success) {
+            console.log('✅ Program creation completed successfully');
+            await startMergeReportPolling(env, schoolId, act, subfolder);
+          } else {
+            console.log('❌ Program creation failed');
+            const runFolder = path.dirname(subfolder);
+            await logFailedRun(runFolder, act, schoolId, 'Program creation failed during execution');
+          }
+        } catch (error) {
+          console.log(`❌ [CreateProgram] ${error.message}`);
+          await browser.close();
+          const runFolder = path.dirname(subfolder);
+          await logFailedRun(runFolder, act, schoolId, `Program creation error: ${error.message}`);
         }
       }
     }
