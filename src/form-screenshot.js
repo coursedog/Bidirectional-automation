@@ -111,5 +111,3 @@ async function screenshotFormRoot(page, outputPath, rootSelector = 'form[data-te
 }
 
 module.exports = { screenshotFormRoot };
-
-

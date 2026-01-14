@@ -244,8 +244,6 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
   }
 }
 
-
-
 /**
  * Simple helper to check if user wants to retry after a failed save
  * @param {string} errorType - Type of error

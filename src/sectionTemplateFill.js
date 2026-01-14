@@ -1978,7 +1978,6 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
       console.log('ℹ️ [Meeting Patterns] No dropdowns found in the modal.');
     }
 
-
     // Close the modal
     const closeBtn = meetingDialog.locator('button[data-test="close-modal-btn"]');
 
@@ -4622,7 +4621,6 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
           }
         }
 
-
         // If this is the first run and we successfully edited a relationship, 
         // start the merge report polling and then run the flow again to create a new relationship
         if (!isSecondRun) {
@@ -4824,7 +4822,6 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
     return false;
   }
 }
-
 
 module.exports = {
   fillBaselineTemplate,

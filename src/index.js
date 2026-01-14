@@ -54,7 +54,6 @@ function getFormNameForAction(action, courseFormName, programFormName) {
   return null;
 }
 
-
 ; (async () => {
   try {
     // 0) Inputs
