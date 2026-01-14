@@ -55,7 +55,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
 }
 
 
-;(async () => {
+; (async () => {
   try {
     // 0) Inputs
     const { email, password, env, productSlug, schoolId, action, courseFormName, programFormName } = gatherInputs();
@@ -88,7 +88,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, false);
       // 3) Seed cookies & localStorage
       await seedContext(ctx, baseDomain, email, schoolId);
-      
+
       // Determine the correct product slug based on the action
       const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'courseAll'];
       const programActions = ['updateProgram', 'createProgram'];
@@ -103,7 +103,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       if (act === 'update' || act === 'inactivateSection') {
         currentProductSlug = 'sm/section-dashboard';
       }
-      
+
       // 4) Sign in
       try {
         await signIn(page, email, password, currentProductSlug, env);
@@ -155,7 +155,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       const now = new Date();
       const pad = n => n.toString().padStart(2, '0');
       const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-      
+
       // Continue with the same logic as runFlow but using the shared run folder
       const actionFormName = getFormNameForAction(act, courseFormName, programFormName);
       await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, actionFormName);
@@ -166,7 +166,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       // Reset session course tracking for new run
       global.sessionUsedCourses.clear();
       console.log(`🔄 Reset session course tracking for new run`);
-      
+
       const videoName = `${schoolId}-${act}-debugging-run`;
       // 2) Browser & Context (with video recording)
       // Launch in headed mode for potential user takeover, but minimized initially
@@ -197,12 +197,12 @@ function getFormNameForAction(action, courseFormName, programFormName) {
 
       // Optional: hand control to computer-use agent if AGENT_MODE is set
       //if (process.env.AGENT_MODE === '1') {
-        //await runComputerUseAgent(page, {
-          //allowedDomains: [baseDomain],
-          //userGoal: process.env.AGENT_GOAL || 'Inspect the page and do nothing destructive.',
-          //stepBudget: Number(process.env.AGENT_STEPS || 30),
-          //allowNavigation: true
-        //});
+      //await runComputerUseAgent(page, {
+      //allowedDomains: [baseDomain],
+      //userGoal: process.env.AGENT_GOAL || 'Inspect the page and do nothing destructive.',
+      //stepBudget: Number(process.env.AGENT_STEPS || 30),
+      //allowNavigation: true
+      //});
       //}
 
       // Check if a merge is in progress and exit if so
@@ -231,16 +231,16 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const runFolder = path.join(outputDir, `Run-${dateStr}`);
       fs.mkdirSync(runFolder, { recursive: true });
-      
+
       console.log(`\n🚀 Starting "${act}" run in folder: ${runFolder}`);
-      
+
       // Create product and method-specific subfolder within the run folder
       const productFolder = getProductFolder(act);
       const subfolder = path.join(runFolder, productFolder, act);
       fs.mkdirSync(subfolder, { recursive: true });
 
       // Initialize run-scoped logger for this action subfolder before any further logs
-      try { ensureRunLogger(subfolder); } catch (_) {}
+      try { ensureRunLogger(subfolder); } catch (_) { }
 
       // Execute the action
       const actionFormName = getFormNameForAction(act, courseFormName, programFormName);
@@ -286,7 +286,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         }
         await captureModalBefore(page, subfolder, 'update');
         // Capture details "before" screenshots for Meeting Patterns & Instructor
-        try { await meetAndProfDetails(page, subfolder, 'update'); } catch (_) {}
+        try { await meetAndProfDetails(page, subfolder, 'update'); } catch (_) { }
         console.log('\n📝 Filling section template fields...');
         await fillBaselineTemplate(page, schoolId, 'update');
         // Call bannerEthosScheduleType for banner_ethos schools
@@ -295,13 +295,13 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         }
         await validateAndResetMeetingPatterns(page, subfolder, 'update');
         let saveSuccess = await validateAndResetProfessors(page, subfolder, 'update', browser, schoolId, null, dateStr);
-        
+
         // Log the save result
         if (saveSuccess) {
           console.log('\n📝 Section was saved successfully.');
         } else {
           console.log('\n📝 Section was not saved.');
-        }        
+        }
         // saveSuccess is now set by validateAndResetProfessors which handles saving internally
         await browser.close();
         if (saveSuccess) {
@@ -358,7 +358,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         await console.log('\n🔗 Initiating Relationships edit process...');
         let result = await relationshipsFill(baseDomain, page, subfolder, 'editRelationships', schoolId, false, browser);
         await browser.close();
-        
+
         if (result === 'edit_completed' || result === true) {
           await startMergeReportPolling(env, schoolId, act, subfolder);
         } else {
@@ -371,7 +371,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         await console.log('\n🔗 Initiating Relationships creation process...');
         let result = await relationshipsFill(baseDomain, page, subfolder, 'createRelationships', schoolId, true, browser);
         await browser.close();
-        
+
         if (result === true) {
           await startMergeReportPolling(env, schoolId, act, subfolder);
         } else {
@@ -398,7 +398,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         console.log('\n📝 Filling section template fields...');
         // fillBaselineTemplate will handle screenshot and save internally for this action
         let saveSuccess = await fillBaselineTemplate(page, schoolId, 'inactivateSection', subfolder, browser);
-      
+
         await browser.close();
         if (saveSuccess) {
           await startMergeReportPolling(env, schoolId, act, subfolder);
@@ -413,7 +413,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         try {
           const success = await updateCourse(page, subfolder, schoolId, browser, 'updateCourse');
           await browser.close();
-          
+
           if (success) {
             console.log('✅ Course update completed successfully');
             await startMergeReportPolling(env, schoolId, act, subfolder);
@@ -433,7 +433,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         try {
           const success = await updateProgram(page, subfolder, schoolId, browser);
           await browser.close();
-          
+
           if (success) {
             console.log('✅ Program update completed successfully');
             await startMergeReportPolling(env, schoolId, act, subfolder);
@@ -453,7 +453,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         try {
           const success = await updateCourse(page, subfolder, schoolId, browser, 'inactivateCourse');
           await browser.close();
-          
+
           if (success) {
             console.log('✅ Course inactivation completed successfully');
             await startMergeReportPolling(env, schoolId, act, subfolder);
@@ -473,7 +473,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         try {
           const success = await updateCourse(page, subfolder, schoolId, browser, 'newCourseRevision');
           await browser.close();
-          
+
           if (success) {
             console.log('✅ Course revision completed successfully');
             await startMergeReportPolling(env, schoolId, act, subfolder);
@@ -485,7 +485,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         } catch (error) {
           console.log(`❌ Course revision error: ${error.message}`);
           await browser.close();
-          
+
           const runFolder = path.dirname(subfolder);
           await logFailedRun(runFolder, act, schoolId, `Course revision error: ${error.message}`);
         }
@@ -494,7 +494,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         try {
           const success = await createCourse(page, subfolder, schoolId, browser, formName);
           await browser.close();
-          
+
           if (success) {
             console.log('✅ Course creation completed successfully');
             await startMergeReportPolling(env, schoolId, act, subfolder);
@@ -506,7 +506,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         } catch (error) {
           console.log(`❌ Course creation error: ${error.message}`);
           await browser.close();
-          
+
           const runFolder = path.dirname(subfolder);
           await logFailedRun(runFolder, act, schoolId, `Course creation error: ${error.message}`);
         }
@@ -515,7 +515,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
         try {
           const success = await createProgram(page, subfolder, schoolId, browser, formName);
           await browser.close();
-          
+
           if (success) {
             console.log('✅ Program creation completed successfully');
             await startMergeReportPolling(env, schoolId, act, subfolder);
@@ -540,9 +540,9 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const sharedRunFolder = path.join(outputDir, `Run-${dateStr}`);
       fs.mkdirSync(sharedRunFolder, { recursive: true });
-      
+
       console.log(`\n🚀 Starting "All Section Test Cases" run in folder: ${sharedRunFolder}`);
-      
+
       await runFlowInFolder('update', sharedRunFolder);
       await runFlowInFolder('create', sharedRunFolder);
       await runFlowInFolder('createNoMeetNoProf', sharedRunFolder);
@@ -556,13 +556,13 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const sharedRunFolder = path.join(outputDir, `Run-${dateStr}`);
       fs.mkdirSync(sharedRunFolder, { recursive: true });
-      
+
       // Reset session course tracking for new run
       global.sessionUsedCourses.clear();
       console.log(`🔄 Reset session course tracking for new run`);
-      
+
       console.log(`\n🚀 Starting "All Course Test Cases" run in folder: ${sharedRunFolder}`);
-      
+
       await runFlowInFolder('updateCourse', sharedRunFolder);
       await runFlowInFolder('inactivateCourse', sharedRunFolder);
       await runFlowInFolder('newCourseRevision', sharedRunFolder);
@@ -574,13 +574,13 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
       const sharedRunFolder = path.join(outputDir, `Run-${dateStr}`);
       fs.mkdirSync(sharedRunFolder, { recursive: true });
-      
+
       // Reset session course tracking for new run
       global.sessionUsedCourses.clear();
       console.log(`🔄 Reset session course tracking for new run`);
-      
+
       console.log(`\n🚀 Starting "Both Products - All Test Cases" run in folder: ${sharedRunFolder}`);
-      
+
       // First run all Academic Scheduling actions
       console.log('\n📚 Running Academic Scheduling Test Cases...');
       await runFlowInFolder('update', sharedRunFolder);
@@ -589,7 +589,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
       await runFlowInFolder('editRelationships', sharedRunFolder);
       await runFlowInFolder('createRelationships', sharedRunFolder);
       await runFlowInFolder('inactivateSection', sharedRunFolder);
-      
+
       // Then run all Curriculum Management actions
       console.log('\n📖 Running Curriculum Management Test Cases...');
       await runFlowInFolder('updateCourse', sharedRunFolder);

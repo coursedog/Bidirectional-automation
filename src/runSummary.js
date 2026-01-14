@@ -18,21 +18,21 @@ async function appendRunSummary(runFolder, id, mergeReportURL, status, mergeRepo
     // Create filename with timestamp for uniqueness
     const summaryFileName = `RUN-SUMMARY-${schoolId}.md`;
     const summaryFilePath = path.join(runFolder, summaryFileName);
-    
+
     // Determine product based on action
     const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'createProgram', 'updateProgram'];
     const product = courseActions.includes(action) ? 'Curriculum Management' : 'Academic Scheduling';
-    
+
     // Check if file exists, if not create with headers
     let fileContent = '';
     if (!fs.existsSync(summaryFilePath)) {
       fileContent = `# Run Summary Report - ${schoolId}\n\n`;
-      
+
       // Check if this is a "both products" run by looking at the folder structure
       const academicSchedulingPath = path.join(runFolder, 'Academic Scheduling');
       const curriculumManagementPath = path.join(runFolder, 'Curriculum Management');
       const isBothProducts = fs.existsSync(academicSchedulingPath) && fs.existsSync(curriculumManagementPath);
-      
+
       if (isBothProducts) {
         // Create separate tables for both products
         fileContent += `## Academic Scheduling Test Cases\n\n`;
@@ -50,13 +50,13 @@ async function appendRunSummary(runFolder, id, mergeReportURL, status, mergeRepo
     } else {
       fileContent = fs.readFileSync(summaryFilePath, 'utf8');
     }
-    
+
     // Format the date for display
     const formattedDate = new Date(date).toLocaleString();
-    
+
     // Create new row
     const newRow = `| ${id} | [View Report](${mergeReportURL}) | ${status} | ${mergeReportStatus || 'N/A'} | ${formattedDate} | ${action} | ${errors} |\n`;
-    
+
     // Insert the row in the appropriate section
     if (fileContent.includes('## Academic Scheduling Test Cases') && fileContent.includes('## Curriculum Management Test Cases')) {
       // Both products - insert in appropriate section
@@ -76,10 +76,10 @@ async function appendRunSummary(runFolder, id, mergeReportURL, status, mergeRepo
       // Single product - append at the end
       fileContent += newRow;
     }
-    
+
     // Write the updated content
     fs.writeFileSync(summaryFilePath, fileContent, 'utf8');
-    
+
     console.log(`✅ Run summary appended to: ${summaryFilePath}`);
     return summaryFilePath;
   } catch (error) {
@@ -97,10 +97,10 @@ function extractStepsStatus(steps) {
   if (!Array.isArray(steps) || steps.length === 0) {
     return 'No steps data';
   }
-  
+
   // Look for specific priority statuses first
   const priorityStatuses = ['unable to sync some changes', 'failed', 'error'];
-  
+
   for (const step of steps) {
     if (step && step.status) {
       // Check if this is a priority status
@@ -109,14 +109,14 @@ function extractStepsStatus(steps) {
       }
     }
   }
-  
+
   // If no priority status found, return the first status found
   for (const step of steps) {
     if (step && step.status) {
       return step.status;
     }
   }
-  
+
   return 'No status available';
 }
 
@@ -129,14 +129,14 @@ function extractErrors(steps) {
   if (!Array.isArray(steps) || steps.length === 0) {
     return 'N/A';
   }
-  
+
   for (const step of steps) {
     if (step && step.errors && Array.isArray(step.errors) && step.errors.length > 0) {
       // Return the first error message
       return step.errors[0].error || 'Unknown error';
     }
   }
-  
+
   return 'N/A';
 }
 
@@ -149,9 +149,9 @@ function extractMetadataDifferences(steps) {
   if (!Array.isArray(steps) || steps.length === 0) {
     return [];
   }
-  
+
   const metadataArray = [];
-  
+
   for (const step of steps) {
     if (step && step.misc && step.misc.updates) {
       // Iterate through all entity updates
@@ -170,7 +170,7 @@ function extractMetadataDifferences(steps) {
       }
     }
   }
-  
+
   return metadataArray;
 }
 

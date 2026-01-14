@@ -10,15 +10,16 @@ async function screenshotFormRoot(page, outputPath, rootSelector = 'form[data-te
   try {
     // Ensure containers are scrolled to the top for stable coordinates
     await page.evaluate(() => {
-      try { window.scrollTo(0, 0); } catch (_) {}
-      try { const main = document.querySelector('main#main.content'); if (main) main.scrollTo(0, 0); } catch (_) {}
-      try { const content = document.querySelector('.content'); if (content) content.scrollTo(0, 0); } catch (_) {}
+      try { window.scrollTo(0, 0); } catch (_) { }
+      try { const main = document.querySelector('main#main.content'); if (main) main.scrollTo(0, 0); } catch (_) { }
+      try { const content = document.querySelector('.content'); if (content) content.scrollTo(0, 0); } catch (_) { }
     });
 
     // Strong CSS to disable internal scrollbars and allow full height
     let styleHandle = null;
     try {
-      styleHandle = await page.addStyleTag({ content: `
+      styleHandle = await page.addStyleTag({
+        content: `
         /* Hide fixed chrome that can overlay */
         [data-test="app-navigation"], header, nav.app-navbar, .app-navbar { visibility: hidden !important; }
         /* Ensure main containers don't clip */
@@ -32,7 +33,7 @@ async function screenshotFormRoot(page, outputPath, rootSelector = 'form[data-te
         .form-card, .card-body, .auto-form-row { max-height: none !important; height: auto !important; overflow: visible !important; }
       `});
       await page.waitForTimeout(100);
-    } catch (_) {}
+    } catch (_) { }
 
     const rootHandle = page.locator(rootSelector).first();
     await rootHandle.waitFor({ state: 'visible', timeout: 60000 });
@@ -53,15 +54,15 @@ async function screenshotFormRoot(page, outputPath, rootSelector = 'form[data-te
             el.style.height = 'auto';
             el.style.maxHeight = 'none';
           }
-        } catch (_) {}
+        } catch (_) { }
         el = el.parentElement;
       }
       // Ensure html/body expand
       document.documentElement.style.height = 'auto';
       document.body.style.height = 'auto';
       // Nudge layout and force reflow
-      try { root.scrollTo(0, root.scrollHeight); } catch (_) {}
-      try { root.scrollTo(0, 0); } catch (_) {}
+      try { root.scrollTo(0, root.scrollHeight); } catch (_) { }
+      try { root.scrollTo(0, 0); } catch (_) { }
     }, rootSelector);
 
     // Let layout settle after CSS adjustments
@@ -73,16 +74,16 @@ async function screenshotFormRoot(page, outputPath, rootSelector = 'form[data-te
       const step = 600;
       if (total && total > step) {
         for (let y = 0; y <= total; y += step) {
-          try { await rootHandle.evaluate((el, pos) => el.scrollTo(0, pos), y); } catch (_) {}
+          try { await rootHandle.evaluate((el, pos) => el.scrollTo(0, pos), y); } catch (_) { }
           await page.waitForTimeout(150);
         }
         // Wait longer after scrolling for lazy content to settle
         await page.waitForTimeout(500);
-        try { await rootHandle.evaluate(el => el.scrollTo(0, 0)); } catch (_) {}
+        try { await rootHandle.evaluate(el => el.scrollTo(0, 0)); } catch (_) { }
         // Wait for layout to stabilize after scrolling back to top
         await page.waitForTimeout(500);
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // Briefly wait for any loading placeholders/spinners inside the root to disappear
     try {
@@ -92,20 +93,20 @@ async function screenshotFormRoot(page, outputPath, rootSelector = 'form[data-te
         if (!anyLoading) break;
         await page.waitForTimeout(200);
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // Prefer element screenshot so Playwright can stitch beyond viewport
     await rootHandle.screenshot({ path: outputPath });
 
     // Remove custom CSS
     try {
-      await page.evaluate((styleEl) => { try { styleEl && styleEl.remove && styleEl.remove(); } catch (_) {} }, styleHandle);
-    } catch (_) {}
+      await page.evaluate((styleEl) => { try { styleEl && styleEl.remove && styleEl.remove(); } catch (_) { } }, styleHandle);
+    } catch (_) { }
   } catch (err) {
     // Fallback to full page if anything goes wrong
     try {
       await page.screenshot({ path: outputPath, fullPage: true });
-    } catch (_) {}
+    } catch (_) { }
   }
 }
 

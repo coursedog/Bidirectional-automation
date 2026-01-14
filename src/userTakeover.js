@@ -49,15 +49,15 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
     console.log(`Error Type: ${errorType}`);
     console.log(`Error Message: ${errorMessage}`);
     console.log('═══════════════════════════════════════');
-    
+
     // Take screenshot of the error state
     const errorScreenshotPath = path.join(subfolder, `${schoolId}-${action}-${errorType}-error.png`);
-    await page.screenshot({ 
+    await page.screenshot({
       path: errorScreenshotPath,
-      fullPage: true 
+      fullPage: true
     });
     console.log(`📸 Error screenshot saved: ${errorScreenshotPath}`);
-    
+
     // Handle confirmation if not skipped
     if (!skipConfirmation) {
       // Simple y/N prompt for user takeover
@@ -71,24 +71,24 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
       console.log(`   • The browser is running in headed mode but minimized`);
       console.log('');
       console.log('⏰ Timeout: 5 minutes - will auto-skip if no response');
-      
+
       // Wait for user response with timeout
       const userResponse = await waitForUserResponseWithTimeout(5); // 5 minutes timeout
-      
+
       if (userResponse === 'timeout' || userResponse === 'no') {
-        const skipReason = userResponse === 'timeout' 
-          ? 'Manual takeover timed out after 5 minutes' 
+        const skipReason = userResponse === 'timeout'
+          ? 'Manual takeover timed out after 5 minutes'
           : 'User chose to skip manual intervention';
-          
+
         console.log(`\n⏭️ SKIPPING MANUAL INTERVENTION: ${skipReason}`);
         console.log('───────────────────────────────────────');
         console.log(`❌ Error logged: ${errorMessage}`);
-        
+
         // Log error to run summary if runFolder is provided
         if (runFolder) {
           await logErrorToRunSummary(runFolder, schoolId, action, errorType, errorMessage, skipReason);
         }
-        
+
         return { success: false, sectionChanged: false };
       }
     } else {
@@ -99,20 +99,20 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
       console.log(`   • The browser is running in headed mode but minimized`);
       console.log('');
     }
-    
+
     // User chose to take over (or confirmation was skipped)
     console.log('🎮 MAKING BROWSER VISIBLE FOR MANUAL INTERVENTION');
     console.log('═══════════════════════════════════════════════════');
-    
+
     // Store current section/course ID before intervention
     const originalSectionId = await getCurrentSectionId(page);
     console.log(`📋 Original section/course before intervention: "${originalSectionId}"`);
-    
+
     // Bring browser window to foreground and maximize
     try {
       await page.bringToFront();
       console.log('✅ Browser window brought to foreground');
-      
+
       // Maximize the OS window via DevTools Protocol so the page becomes responsive
       try {
         const client = await page.context().newCDPSession(page);
@@ -122,12 +122,12 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
       } catch (cdpError) {
         console.log('⚠️ Could not maximize via DevTools Protocol:', cdpError.message);
       }
-      
+
     } catch (error) {
       console.log('⚠️ Could not automatically bring browser to front:', error.message);
       console.log('📱 Please manually click on the browser window in your taskbar');
     }
-    
+
     console.log('');
     console.log('📋 MANUAL INTERVENTION');
     console.log('───────────────────────────────────────');
@@ -137,55 +137,55 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
     console.log('Then return to this terminal and press Enter to resume automation.');
     console.log('(If you don\'t see the browser window, click it in your taskbar.)');
     console.log('⚠️ Do NOT close the browser window.');
-    
+
     // User chose to take over - browser is now visible for manual intervention
     console.log('\n🎯 MANUAL INTERVENTION ACTIVE');
     console.log('───────────────────────────────────────');
     console.log('✅ Fix the issue in the browser and click Save');
     console.log('↩️ Return here and press Enter to resume automation\n');
-    
+
     // Wait for user to confirm completion
     const interventionResponse = await waitForUserInputWithTimeout(5); // 5 minutes timeout
-     
-     if (interventionResponse === 'timeout') {
-       console.log('\n⏰ TIMEOUT REACHED');
-       console.log('───────────────────────────────────────');
-       console.log('⚠️ No user input received within 5 minutes');
-       console.log('🔄 Defaulting to skip step and continue automation...');
-       
-       // Log timeout to run summary if runFolder is provided
-       if (runFolder) {
-         await logErrorToRunSummary(runFolder, schoolId, action, errorType, errorMessage, 'Manual intervention timed out after 5 minutes');
-       }
-       
-       return { success: false, sectionChanged: false };
-     }
-     
-     if (interventionResponse === 'aborted') {
-       console.log('\n🛑 MANUAL INTERVENTION ABORTED');
-       console.log('───────────────────────────────────────');
-       console.log('⚠️ User chose to abort manual intervention');
-       console.log('🔄 Skipping this test and continuing automation...');
-       
-       // Log abort to run summary if runFolder is provided
-       if (runFolder) {
-         await logErrorToRunSummary(runFolder, schoolId, action, errorType, errorMessage, 'User aborted manual intervention - test could not be completed');
-       }
-       
-       return { success: false, sectionChanged: false };
-     }
-     
-     console.log('\n🔄 RESUMING AUTOMATION');
-     console.log('───────────────────────────────────────');
-     console.log('✅ User confirmed manual intervention completed');
-    
+
+    if (interventionResponse === 'timeout') {
+      console.log('\n⏰ TIMEOUT REACHED');
+      console.log('───────────────────────────────────────');
+      console.log('⚠️ No user input received within 5 minutes');
+      console.log('🔄 Defaulting to skip step and continue automation...');
+
+      // Log timeout to run summary if runFolder is provided
+      if (runFolder) {
+        await logErrorToRunSummary(runFolder, schoolId, action, errorType, errorMessage, 'Manual intervention timed out after 5 minutes');
+      }
+
+      return { success: false, sectionChanged: false };
+    }
+
+    if (interventionResponse === 'aborted') {
+      console.log('\n🛑 MANUAL INTERVENTION ABORTED');
+      console.log('───────────────────────────────────────');
+      console.log('⚠️ User chose to abort manual intervention');
+      console.log('🔄 Skipping this test and continuing automation...');
+
+      // Log abort to run summary if runFolder is provided
+      if (runFolder) {
+        await logErrorToRunSummary(runFolder, schoolId, action, errorType, errorMessage, 'User aborted manual intervention - test could not be completed');
+      }
+
+      return { success: false, sectionChanged: false };
+    }
+
+    console.log('\n🔄 RESUMING AUTOMATION');
+    console.log('───────────────────────────────────────');
+    console.log('✅ User confirmed manual intervention completed');
+
     // Check if section/course has changed
     const currentSectionId = await getCurrentSectionId(page);
-    
+
     // Special handling for when current is null - this typically means the section/course was saved and modal closed
     let sectionChanged = false;
     let sectionSaved = false;
-    
+
     if (currentSectionId === null && originalSectionId !== null) {
       // Current is null but original had a value - likely means section/course was saved and modal closed
       sectionSaved = true;
@@ -206,7 +206,7 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
       // Same section/course (both null or both same value)
       console.log(`📋 Same section/course confirmed: "${currentSectionId}"`);
     }
-    
+
     // Reset viewport to automation default and minimize window
     try {
       await page.setViewportSize({ width: 1280, height: 9000 });
@@ -214,19 +214,19 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
     } catch (error) {
       console.log('⚠️ Could not reset viewport:', error.message);
     }
-    
+
     // Brief pause to allow any pending UI updates
     console.log('⏳ Waiting 2 seconds for UI to settle...');
     await page.waitForTimeout(2000);
-    
+
     // Take screenshot after user intervention
     const afterInterventionPath = path.join(subfolder, `${schoolId}-${action}-${errorType}-afterUserIntervention.png`);
-    await page.screenshot({ 
+    await page.screenshot({
       path: afterInterventionPath,
-      fullPage: true 
+      fullPage: true
     });
     console.log(`📸 Post-intervention screenshot saved: ${afterInterventionPath}`);
-    
+
     if (sectionChanged) {
       console.log('🎉 Manual intervention completed with section change - will restart template process!');
       return { success: true, sectionChanged: true, newSectionId: currentSectionId };
@@ -237,7 +237,7 @@ async function offerUserTakeover(page, browser, subfolder, errorType, schoolId, 
       console.log('🎉 Manual intervention completed, automation resumed with same session!');
       return { success: true, sectionChanged: false };
     }
-    
+
   } catch (error) {
     console.error('❌ Error during user takeover:', error.message);
     return { success: false, sectionChanged: false };
@@ -283,10 +283,10 @@ async function waitForUserResponseWithTimeout(timeoutMinutes) {
     const startedAt = Date.now();
 
     const cleanupAndResolve = (result) => {
-      try { clearTimeout(timeoutId); } catch (_) {}
-      try { stdin.setRawMode(false); } catch (_) {}
-      try { stdin.pause(); } catch (_) {}
-      try { stdin.removeListener('data', onInput); } catch (_) {}
+      try { clearTimeout(timeoutId); } catch (_) { }
+      try { stdin.setRawMode(false); } catch (_) { }
+      try { stdin.pause(); } catch (_) { }
+      try { stdin.removeListener('data', onInput); } catch (_) { }
       resolve(result);
     };
 
@@ -354,11 +354,11 @@ async function waitForUserResponseWithTimeout(timeoutMinutes) {
 async function waitForUserInputWithTimeout(timeoutMinutes) {
   return new Promise((resolve) => {
     const timeoutMs = timeoutMinutes * 60 * 1000; // Convert minutes to milliseconds
-    
+
     console.log(`\n🤝 After you fix the issue and click Save, press Enter to resume automation...`);
     console.log(`🛑 Press ESC or C to abort and skip this test`);
     console.log(`⏰ (Timeout: ${timeoutMinutes} minutes - will auto-skip if no response)`);
-    
+
     const stdin = process.stdin;
     // If stdin isn't interactive, we can't reliably wait for user input.
     if (!stdin || !stdin.isTTY || typeof stdin.setRawMode !== 'function') {
@@ -372,7 +372,7 @@ async function waitForUserInputWithTimeout(timeoutMinutes) {
     stdin.setRawMode(true);
     stdin.resume();
     stdin.setEncoding('utf8');
-    
+
     const cleanupAndResolve = (result) => {
       clearTimeout(timeoutId);
       stdin.setRawMode(false);
@@ -386,7 +386,7 @@ async function waitForUserInputWithTimeout(timeoutMinutes) {
       console.log(`\n⏰ ${timeoutMinutes} minute timeout reached!`);
       cleanupAndResolve('timeout');
     }, timeoutMs);
-    
+
     const onInput = (key) => {
       // Check for Enter key (ASCII 13 or \r)
       if (key === '\r' || key === '\n' || key.charCodeAt(0) === 13) {
@@ -410,7 +410,7 @@ async function waitForUserInputWithTimeout(timeoutMinutes) {
         cleanupAndResolve('timeout');
       }
     };
-    
+
     stdin.on('data', onInput);
   });
 }
@@ -429,7 +429,7 @@ async function logErrorToRunSummary(runFolder, schoolId, action, errorType, erro
     const runId = `${schoolId}-${action}-${errorType}-${Date.now()}`;
     const currentDate = new Date().toISOString();
     const errorDetails = `${skipReason}: ${errorMessage}`;
-    
+
     await appendRunSummary(
       runFolder,
       runId,
@@ -441,7 +441,7 @@ async function logErrorToRunSummary(runFolder, schoolId, action, errorType, erro
       action,
       errorDetails
     );
-    
+
     console.log(`✅ Error logged to run summary: ${runId}`);
   } catch (error) {
     console.error('❌ Failed to log error to run summary:', error.message);

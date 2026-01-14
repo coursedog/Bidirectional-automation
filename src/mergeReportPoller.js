@@ -13,8 +13,8 @@ let mergeStartTime = null; // Stopwatch start time
  * @returns {Promise<Object>} - Object containing mergeReportId, mergeReportStatus, totalCount, and mergeHistoryUrl
  */
 async function pollMergeReport(env, schoolId, act) {
-  const baseUrl = env === 'prd' 
-    ? 'https://app.coursedog.com' 
+  const baseUrl = env === 'prd'
+    ? 'https://app.coursedog.com'
     : 'https://staging.coursedog.com';
 
   // New endpoint for polling merge statisComplexFieldus
@@ -118,7 +118,7 @@ async function pollMergeReport(env, schoolId, act) {
  * @returns {Promise<Object>} - Object containing mergeReportId, mergeReportStatus, totalCount, and mergeHistoryUrl
  */
 async function startMergeReportPolling(env, schoolId, act, outputDir, isSecondRun = false) {
-  
+
   const mergeReportData = await pollMergeReport(env, schoolId, act);
   await getMergeReportDetails(env, schoolId, mergeReportData.mergeReportId, act, outputDir, isSecondRun);
   return mergeReportData;
@@ -181,7 +181,7 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     if (conflictHandlingMethod !== undefined) {
       summaryWithUrl.conflictHandlingMethod = conflictHandlingMethod;
     }
-    summaryWithUrl.mergeReportURL = `${baseUrl.replace('/api/v1','')}/#/int/${schoolId}/merge-history/${mergeReportId}`;
+    summaryWithUrl.mergeReportURL = `${baseUrl.replace('/api/v1', '')}/#/int/${schoolId}/merge-history/${mergeReportId}`;
     markdown += '```json\n' + JSON.stringify(summaryWithUrl, null, 2) + '\n```\n\n';
 
     // Placeholders under Summary for specific actions
@@ -205,7 +205,7 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     const files = fs.readdirSync(outputDir);
     const diffFilePattern = new RegExp(`${schoolId}-.*-field-differences-.*\\.txt$`);
     const diffFile = files.find(file => diffFilePattern.test(file));
-    
+
     if (diffFile) {
       const diffFilePath = path.join(outputDir, diffFile);
       const diffText = fs.readFileSync(diffFilePath, 'utf8');
@@ -346,7 +346,7 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
 
     // GET resulting-sis-data and persist to file, then append to markdown (with retries)
     {
-      const baseHost = baseUrl.replace('/api/v1','');
+      const baseHost = baseUrl.replace('/api/v1', '');
       const sisUrl = `${baseHost}/api/v1/${schoolId}/integration/getMergeReportBackup?backupType=resulting-sis-data&getHeadInfo=false&mergeReportId=${encodeURIComponent(mergeReportId)}`;
       console.log(`API URL: ${sisUrl}`);
       const maxAttempts = 3;
@@ -361,7 +361,7 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
             'Authorization': `Bearer ${freshToken}`,
             'Accept': 'application/json'
           };
-          
+
           console.log(`🔁 GET after POST attempt ${attempt}/${maxAttempts}...`);
           const sisResp = await axios.get(sisUrl, { headers: sisHeaders });
           sisData = sisResp.data;
@@ -409,25 +409,25 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     try {
       // Extract merge report status from steps
       const mergeReportStatus = extractStepsStatus(data.steps);
-      
+
       // Extract errors from steps
       const errors = extractErrors(data.steps);
-      
+
       // Generate unique run ID
       const runId = generateRunId(act);
-      
+
       // Get the Run root folder (parent of outputDir which is the action subfolder)
       const runRootFolder = path.dirname(outputDir);
-      
+
       // Create merge report URL
-      const mergeReportURL = `${baseUrl.replace('/api/v1','')}/#/int/${schoolId}/merge-history/${mergeReportId}`;
-      
+      const mergeReportURL = `${baseUrl.replace('/api/v1', '')}/#/int/${schoolId}/merge-history/${mergeReportId}`;
+
       // Determine overall run status based on merge report
       const runStatus = summary.status || 'completed';
-      
+
       // Get current date
       const currentDate = new Date().toISOString();
-      
+
       // Append to run summary
       await appendRunSummary(
         runRootFolder,
@@ -463,63 +463,63 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
 }
 
 async function getAuthToken(env, schoolId) {
-    const baseUrl = env === 'prd' 
-      ? 'https://app.coursedog.com' 
-      : 'https://staging.coursedog.com';
-  
-    const url = `${baseUrl}/api/v1/sessions`;
-  
-    const headers = {
-      'Content-Type': 'application/json',
-      'Accept': '*/*',
-      'Cache-Control': 'no-cache',
-      'Host': env === 'prd' ? 'app.coursedog.com' : 'staging.coursedog.com',
-      'Accept-Encoding': 'gzip, deflate, br',
-      'Connection': 'keep-alive'
-    };
-  
-    // Load credentials from creds.json
-    let creds = { email: '', password: '' };
-    try {
-      const credsPath = path.join(__dirname, 'creds.json');
-      if (fs.existsSync(credsPath)) {
-        creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-      }
-    } catch (_) {}
+  const baseUrl = env === 'prd'
+    ? 'https://app.coursedog.com'
+    : 'https://staging.coursedog.com';
 
-    const body = {
-      email: creds.email,
-      password: creds.password
-    };
-  
-    try {
-      console.log(`🔐 Re-authenticating...`);
-      
-      const response = await axios.post(url, body, { headers });
-      
-      if (response.data && response.data.token) {
-        console.log('✅ Authentication successful');
-        const token = response.data.token;
-        
-        // Fetch section template after successful authentication
-        // await pollMergeReport(token, schoolId, env); // This line was removed as per the edit hint
-        
-        return token;
-      } else {
-        throw new Error('No token received in response');
-      }
-    } catch (error) {
-      console.error('❌ Authentication failed:', error.message);
-      if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
-      }
-      throw error;
+  const url = `${baseUrl}/api/v1/sessions`;
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'Accept': '*/*',
+    'Cache-Control': 'no-cache',
+    'Host': env === 'prd' ? 'app.coursedog.com' : 'staging.coursedog.com',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive'
+  };
+
+  // Load credentials from creds.json
+  let creds = { email: '', password: '' };
+  try {
+    const credsPath = path.join(__dirname, 'creds.json');
+    if (fs.existsSync(credsPath)) {
+      creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
     }
-  }
+  } catch (_) { }
 
-module.exports = { 
-  pollMergeReport, 
+  const body = {
+    email: creds.email,
+    password: creds.password
+  };
+
+  try {
+    console.log(`🔐 Re-authenticating...`);
+
+    const response = await axios.post(url, body, { headers });
+
+    if (response.data && response.data.token) {
+      console.log('✅ Authentication successful');
+      const token = response.data.token;
+
+      // Fetch section template after successful authentication
+      // await pollMergeReport(token, schoolId, env); // This line was removed as per the edit hint
+
+      return token;
+    } else {
+      throw new Error('No token received in response');
+    }
+  } catch (error) {
+    console.error('❌ Authentication failed:', error.message);
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+    }
+    throw error;
+  }
+}
+
+module.exports = {
+  pollMergeReport,
   startMergeReportPolling,
-  getMergeReportDetails 
+  getMergeReportDetails
 }; 
