@@ -26,5 +26,9 @@
     "assets": [
       "Resources/**/*"
     ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coursedog/bidirectional-automation.git"
   }
 }
