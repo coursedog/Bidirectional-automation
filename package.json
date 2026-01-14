@@ -1,15 +1,19 @@
 {
   "name": "@coursedog/coursedog-bidirectional-tests",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Bi-directional Tests Automation Tool for Coursedog's Academic Scheduling and Curriculum Management products",
   "main": "main.js",
   "bin": "main.js",
+  "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "start": "node main.js",
     "install-browsers": "npx playwright install",
     "run": "node main.js"
   },
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "automation",
     "testing",
