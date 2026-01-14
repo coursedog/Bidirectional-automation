@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "emitDeclarationOnly": false,
     "module": "nodenext",
     "outDir": "dist",
+    "rootDir": "src",
     "target": "esnext",
   },
   "include": [
