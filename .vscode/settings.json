@@ -1,0 +1,10 @@
+{
+  "editor.defaultFormatter": "vscode.typescript-language-features",
+  "editor.tabSize": 2,
+  "javascript.format.semicolons": "insert",
+  "javascript.format.insertSpaceAfterFunctionKeywordForAnonymousFunctions": false,
+  "javascript.format.insertSpaceBeforeFunctionParenthesis": false,
+  "typescript.format.semicolons": "insert",
+  "typescript.format.insertSpaceAfterFunctionKeywordForAnonymousFunctions": false,
+  "typescript.format.insertSpaceBeforeFunctionParenthesis": false,
+}

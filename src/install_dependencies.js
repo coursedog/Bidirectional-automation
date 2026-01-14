@@ -8,7 +8,7 @@ const isMac = os.platform() === "darwin";
 const isLinux = os.platform() === "linux";
 
 console.log("🚀 Bi-directional Tests Automation Tool - Dependency Installer");
-console.log("=" .repeat(60));
+console.log("=".repeat(60));
 
 // Check if package.json exists
 if (!fs.existsSync("package.json")) {
@@ -36,9 +36,9 @@ exec("npm install", (error, stdout, stderr) => {
   }
   if (stderr) console.error(stderr);
   if (stdout) console.log(stdout);
-  
+
   console.log("✅ npm dependencies installed successfully");
-  
+
   // Install Playwright browsers
   console.log("\n🌐 Installing Playwright browsers...");
   exec("npx playwright install", (error, stdout, stderr) => {
@@ -48,9 +48,9 @@ exec("npm install", (error, stdout, stderr) => {
     }
     if (stderr) console.error(stderr);
     if (stdout) console.log(stdout);
-    
+
     console.log("✅ Playwright browsers installed successfully");
-    
+
     // Set PowerShell execution policy on Windows
     if (isWindows) {
       console.log("\n⚙️ Setting PowerShell execution policy...");
@@ -61,7 +61,7 @@ exec("npm install", (error, stdout, stderr) => {
         } else {
           console.log("✅ PowerShell execution policy set successfully");
         }
-        
+
         console.log("\n🎉 Installation completed successfully!");
         console.log("\nNext steps:");
         console.log("1. Run 'node main.js' or 'npm start' from the repo root to begin");

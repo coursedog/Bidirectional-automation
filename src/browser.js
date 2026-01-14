@@ -18,15 +18,15 @@ async function launch(env, videoDir, videoName, headless = true) {
     // In headed mode we omit size so Playwright derives it from the window.
     contextOptions.recordVideo = headless
       ? {
-          dir: videoDir,
-          size: { width: 1280, height: 9000 }
-        }
+        dir: videoDir,
+        size: { width: 1280, height: 9000 }
+      }
       : {
-          dir: videoDir
-        };
+        dir: videoDir
+      };
   }
 
-  const browser = await chromium.launch({ 
+  const browser = await chromium.launch({
     headless: headless,
     // When headed, start minimized; window/viewport becomes responsive via viewport: null
     args: headless ? [] : [
@@ -36,8 +36,8 @@ async function launch(env, videoDir, videoName, headless = true) {
       '--disable-blink-features=AutomationControlled' // Hide automation detection
     ]
   });
-  const ctx     = await browser.newContext(contextOptions);
-  const page    = await ctx.newPage();
+  const ctx = await browser.newContext(contextOptions);
+  const page = await ctx.newPage();
   page.setDefaultTimeout(60000);
   page.setDefaultNavigationTimeout(60000);
 

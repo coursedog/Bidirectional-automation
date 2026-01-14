@@ -3,15 +3,16 @@ const path = require('path');
 async function screenshotSectionModal(page, outputPath, rootSelector = 'div.modal-dialog') {
   // Make containers expand and avoid clipping/scrolling
   let styleHandle = null;
-  try { await page.evaluate(() => window.scrollTo(0, 0)); } catch (_) {}
+  try { await page.evaluate(() => window.scrollTo(0, 0)); } catch (_) { }
   try {
-    styleHandle = await page.addStyleTag({ content: `
+    styleHandle = await page.addStyleTag({
+      content: `
       html, body, .content, main#main, #app { overflow: visible !important; height: auto !important; }
       .modal-dialog, .modal-content, .modal-body { max-height: none !important; height: auto !important; overflow: visible !important; }
       #section-modal-editor { max-height: none !important; height: auto !important; overflow: visible !important; }
     `});
     await page.waitForTimeout(100);
-  } catch (_) {}
+  } catch (_) { }
 
   // Target the section editor specifically (avoids multiple dialogs strict-mode error)
   const editor = page.locator('#section-modal-editor').first();
@@ -25,12 +26,12 @@ async function screenshotSectionModal(page, outputPath, rootSelector = 'div.moda
     const total = await editor.evaluate(el => el.scrollHeight);
     const step = 600;
     for (let y = 0; y <= total; y += step) {
-      try { await editor.evaluate((el, pos) => el.scrollTo(0, pos), y); } catch (_) {}
+      try { await editor.evaluate((el, pos) => el.scrollTo(0, pos), y); } catch (_) { }
       await page.waitForTimeout(120);
     }
     await page.waitForTimeout(250);
-    try { await editor.evaluate(el => el.scrollTo(0, 0)); } catch (_) {}
-  } catch (_) {}
+    try { await editor.evaluate(el => el.scrollTo(0, 0)); } catch (_) { }
+  } catch (_) { }
 
   // Briefly wait for any loading placeholders/spinners inside the editor to disappear
   try {
@@ -40,14 +41,14 @@ async function screenshotSectionModal(page, outputPath, rootSelector = 'div.moda
       if (!anyLoading) break;
       await page.waitForTimeout(200);
     }
-  } catch (_) {}
+  } catch (_) { }
 
   // Compute content bounds based on visible children to avoid giant whitespace
   const metrics = await editor.evaluate((root) => {
-    try { root.scrollTo(0, 0); } catch (_) {}
+    try { root.scrollTo(0, 0); } catch (_) { }
     // Nudge layout and trigger lazy content
-    try { root.scrollTo(0, root.scrollHeight); } catch (_) {}
-    try { root.scrollTo(0, 0); } catch (_) {}
+    try { root.scrollTo(0, root.scrollHeight); } catch (_) { }
+    try { root.scrollTo(0, 0); } catch (_) { }
     const elements = root.querySelectorAll('.form-card, .card, [data-test], .auto-form-row, section');
     let top = Number.POSITIVE_INFINITY;
     let left = Number.POSITIVE_INFINITY;
@@ -88,7 +89,7 @@ async function screenshotSectionModal(page, outputPath, rootSelector = 'div.moda
       deviceScaleFactor: 1,
       mobile: false
     });
-  } catch (_) {}
+  } catch (_) { }
 
   await page.screenshot({
     path: outputPath,
@@ -100,13 +101,13 @@ async function screenshotSectionModal(page, outputPath, rootSelector = 'div.moda
     }
   });
 
-  try { await client.send('Emulation.clearDeviceMetricsOverride'); } catch (_) {}
-  try { await page.evaluate((styleEl) => { try { styleEl && styleEl.remove && styleEl.remove(); } catch (_) {} }, styleHandle); } catch (_) {}
+  try { await client.send('Emulation.clearDeviceMetricsOverride'); } catch (_) { }
+  try { await page.evaluate((styleEl) => { try { styleEl && styleEl.remove && styleEl.remove(); } catch (_) { } }, styleHandle); } catch (_) { }
 }
 
 async function openSection(page) {
   console.log('\n✅ Clicking on Section');
-  
+
   try {
     // First, try to find a section with no conflicts
     console.log('🔍 Looking for sections with no conflicts...');
@@ -115,7 +116,7 @@ async function openSection(page) {
     console.log('✅ Found and clicked on section with no conflicts');
   } catch (error) {
     console.log('⚠️ No sections without conflicts found, looking for sections with conflicts...');
-    
+
     try {
       // Fallback: look for sections with conflicts
       await page.waitForSelector('[aria-label="This section has conflicts."]', { state: 'visible', timeout: 10000 });
@@ -126,41 +127,41 @@ async function openSection(page) {
       throw new Error('❌ No sections available for the selected term. Please run a merge for the current term and try again.');
     }
   }
-  
-  await page.waitForSelector('#section-modal-editor', { state: 'visible', timeout: 60000 });
-} 
 
-  async function createSection(page, searchTerm = 'a') {
-    console.log('▶ Opening Add Section modal');
-    // 1) Click the top “Add Section” button
-    await page.click('button[data-test="add-section-btn"]');
-    // wait for the create-section modal to appear
-    await page.waitForSelector('div.modal-dialog', { state: 'visible', timeout: 60000 });
-  
-    console.log('▶ Activating course search dropdown');
-    // 2) Click the async-course-select wrapper (only in the modal)
-    const picker = page.locator('div.modal-dialog div[data-test="async-course-select"]');
-    await picker.click();
-  
-    // 3) Fill *that* multiselect’s input
-    const input = picker.locator('input.multiselect__input');
-    await input.fill(searchTerm);
-  
-    console.log('▶ Waiting for results to load…');
-    // 4) Wait for the *same* wrapper’s dropdown items, then click first
-    const firstOption = picker.locator('.multiselect__content-wrapper li').first();
-    await firstOption.waitFor({ state: 'visible', timeout: 60000 });
-    await firstOption.click();
-  
-    console.log('▶ Submitting Add Section');
-    // 5) Click the bottom “ADD SECTION” and wait for the new Section editor
-    await Promise.all([
-      page.click('button[data-test="add-section-button"]'),
-      page.waitForSelector('button[data-test="save-section-btn"]', { state: 'visible', timeout: 60000 })
-    ]);
-  
-    console.log('✅ Section editor is now open');
-  }
+  await page.waitForSelector('#section-modal-editor', { state: 'visible', timeout: 60000 });
+}
+
+async function createSection(page, searchTerm = 'a') {
+  console.log('▶ Opening Add Section modal');
+  // 1) Click the top “Add Section” button
+  await page.click('button[data-test="add-section-btn"]');
+  // wait for the create-section modal to appear
+  await page.waitForSelector('div.modal-dialog', { state: 'visible', timeout: 60000 });
+
+  console.log('▶ Activating course search dropdown');
+  // 2) Click the async-course-select wrapper (only in the modal)
+  const picker = page.locator('div.modal-dialog div[data-test="async-course-select"]');
+  await picker.click();
+
+  // 3) Fill *that* multiselect’s input
+  const input = picker.locator('input.multiselect__input');
+  await input.fill(searchTerm);
+
+  console.log('▶ Waiting for results to load…');
+  // 4) Wait for the *same* wrapper’s dropdown items, then click first
+  const firstOption = picker.locator('.multiselect__content-wrapper li').first();
+  await firstOption.waitFor({ state: 'visible', timeout: 60000 });
+  await firstOption.click();
+
+  console.log('▶ Submitting Add Section');
+  // 5) Click the bottom “ADD SECTION” and wait for the new Section editor
+  await Promise.all([
+    page.click('button[data-test="add-section-button"]'),
+    page.waitForSelector('button[data-test="save-section-btn"]', { state: 'visible', timeout: 60000 })
+  ]);
+
+  console.log('✅ Section editor is now open');
+}
 
 async function captureModalBefore(page, outputDir, action) {
   console.log('\n✅ Section loaded');

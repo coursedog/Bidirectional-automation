@@ -13,25 +13,25 @@ const axios = require('axios');
 const programActions = ['createProgram', 'updateProgram'];
 
 async function performPreflightChecks(env, schoolId, token, productSlug, action) {
-  const baseUrl = env === 'prd' 
-    ? 'https://app.coursedog.com' 
+  const baseUrl = env === 'prd'
+    ? 'https://app.coursedog.com'
     : 'https://staging.coursedog.com';
 
   console.log('\n🔍 Running Merge settings checks...');
   if (programActions.includes(action) && !schoolId.includes('_peoplesoft')) {
     throw new Error('Program actions are only supported for Peoplesoft schools (schoolId must include "_peoplesoft").');
   }
-  
+
   try {
     // Step 1: Get Integration Save State ID
     const saveStateId = await getIntegrationSaveStateId(baseUrl, schoolId, token);
-    
+
     // Step 2: Validate Integration Schedule (realtime check)
     await validateIntegrationSchedule(baseUrl, schoolId, token);
-    
+
     // Step 3: Validate Merge Settings based on product and action
     await validateMergeSettings(baseUrl, schoolId, token, saveStateId, productSlug, action);
-    
+
     console.log('✅ All Merge settings checks passed!\n');
   } catch (error) {
     // Display user-friendly error message
@@ -46,7 +46,7 @@ async function performPreflightChecks(env, schoolId, token, productSlug, action)
  */
 async function getIntegrationSaveStateId(baseUrl, schoolId, token) {
   const url = `${baseUrl}/api/v1/${schoolId}/general/enabledIntegrationSaveState`;
-  
+
   const headers = {
     'Authorization': `Bearer ${token}`,
     'Accept': '*/*',
@@ -57,11 +57,11 @@ async function getIntegrationSaveStateId(baseUrl, schoolId, token) {
   try {
     console.log('  → Fetching integration save state...');
     const response = await axios.get(url, { headers });
-    
+
     if (!response.data?.enabledIntegrationSaveState?.integrationSaveStateId) {
       throw new Error('Integration Save State ID not found. Please ensure integration is configured for this school.');
     }
-    
+
     const saveStateId = response.data.enabledIntegrationSaveState.integrationSaveStateId;
     console.log(`  ✓ Integration Save State ID: ${saveStateId}`);
     return saveStateId;
@@ -81,7 +81,7 @@ async function getIntegrationSaveStateId(baseUrl, schoolId, token) {
  */
 async function validateIntegrationSchedule(baseUrl, schoolId, token) {
   const url = `${baseUrl}/api/v1/${schoolId}/general/integrationSchedule`;
-  
+
   const headers = {
     'Authorization': `Bearer ${token}`,
     'Accept': '*/*',
@@ -92,20 +92,20 @@ async function validateIntegrationSchedule(baseUrl, schoolId, token) {
   try {
     console.log('  → Checking integration schedule...');
     const response = await axios.get(url, { headers });
-    
+
     const syncType = response.data?.integrationSchedule?.syncType;
-    
+
     if (!syncType) {
       throw new Error('Integration schedule not configured for this school.');
     }
-    
+
     if (syncType !== 'realtime') {
       throw new Error(
         `Real-time merges are not currently enabled for ${schoolId}, only ${syncType} merges are enabled.\n` +
         `    Action required: Enable real-time merges in the school settings.`
       );
     }
-    
+
     console.log('  ✓ Real-time merges are enabled');
   } catch (error) {
     if (error.message.includes('must be "realtime"') || error.message.includes('not configured')) {
@@ -120,7 +120,7 @@ async function validateIntegrationSchedule(baseUrl, schoolId, token) {
  */
 async function validateMergeSettings(baseUrl, schoolId, token, saveStateId, productSlug, action) {
   console.log('  → Validating merge settings...');
-  
+
   // Determine which entity types to validate based on product and action
   if (action === 'both') {
     // Both products - validate all three entity types
@@ -135,7 +135,7 @@ async function validateMergeSettings(baseUrl, schoolId, token, saveStateId, prod
   } else if (productSlug === 'sm/section-dashboard') {
     // Academic Scheduling - always check sections
     await validateSectionMergeSettings(baseUrl, schoolId, token, saveStateId);
-    
+
     // Check relationships for specific actions
     const relationshipActions = ['editRelationships', 'createRelationships', 'all'];
     if (relationshipActions.includes(action)) {
@@ -149,11 +149,11 @@ async function validateMergeSettings(baseUrl, schoolId, token, saveStateId, prod
  */
 async function validateCourseMergeSettings(baseUrl, schoolId, token, saveStateId) {
   await checkEntityMergeSettings(
-    baseUrl, 
-    schoolId, 
-    token, 
-    saveStateId, 
-    'coursesCm', 
+    baseUrl,
+    schoolId,
+    token,
+    saveStateId,
+    'coursesCm',
     'Courses'
   );
 }
@@ -177,11 +177,11 @@ async function validateProgramMergeSettings(baseUrl, schoolId, token, saveStateI
  */
 async function validateSectionMergeSettings(baseUrl, schoolId, token, saveStateId) {
   await checkEntityMergeSettings(
-    baseUrl, 
-    schoolId, 
-    token, 
-    saveStateId, 
-    'sections', 
+    baseUrl,
+    schoolId,
+    token,
+    saveStateId,
+    'sections',
     'Sections'
   );
 }
@@ -191,11 +191,11 @@ async function validateSectionMergeSettings(baseUrl, schoolId, token, saveStateI
  */
 async function validateRelationshipMergeSettings(baseUrl, schoolId, token, saveStateId) {
   await checkEntityMergeSettings(
-    baseUrl, 
-    schoolId, 
-    token, 
-    saveStateId, 
-    'relationships', 
+    baseUrl,
+    schoolId,
+    token,
+    saveStateId,
+    'relationships',
     'Relationships'
   );
 }
@@ -205,7 +205,7 @@ async function validateRelationshipMergeSettings(baseUrl, schoolId, token, saveS
  */
 async function checkEntityMergeSettings(baseUrl, schoolId, token, saveStateId, entityType, displayName) {
   const url = `${baseUrl}/api/v1/int/${schoolId}/merge-settings?entityType=${entityType}&integrationSaveStateId=${saveStateId}`;
-  
+
   const headers = {
     'Authorization': `Bearer ${token}`,
     'Accept': '*/*',
@@ -216,14 +216,14 @@ async function checkEntityMergeSettings(baseUrl, schoolId, token, saveStateId, e
   try {
     const response = await axios.get(url, { headers });
     const syncSisData = response.data?.stepsToExecute?.syncSisData;
-    
+
     if (syncSisData !== true) {
       throw new Error(
         `Merge setting "Should Coursedog send updates to the SIS?" is disabled for ${displayName}.\n` +
         `    Action required: Enable this setting in merge settings for ${displayName}.`
       );
     }
-    
+
     console.log(`  ✓ ${displayName} merge settings validated ("Should Coursedog send updates to the SIS?": true)`);
   } catch (error) {
     if (error.message.includes('Should Coursedog send updates')) {
