@@ -62,7 +62,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
   // 1) Get API token
   console.log('\n🔐 Getting API token...');
-  const token = await getSchoolTemplate(env, schoolId);
+  const token = await getSchoolTemplate({ email, password }, env, schoolId);
   console.log('📋 Token:', token);
 
   // 2) Pre-flight checks
