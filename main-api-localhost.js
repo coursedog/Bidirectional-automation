@@ -10,7 +10,8 @@ async function main() {
       schoolId: '',
       action: 'createNoMeetNoProf',
       courseFormName: '',
-      programFormName: ''
+      programFormName: '',
+      isApi: true,
     };
 
     run(x);

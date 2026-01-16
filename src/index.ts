@@ -7,7 +7,7 @@ async function runCli() {
     // 0) Inputs
     const { email, password, env, productSlug, schoolId, action, courseFormName, programFormName } = gatherInputs();
 
-    await run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName });
+    await run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName, isApi: false });
 
   } catch (err) {
     console.error('❌ Unhandled error:', err);

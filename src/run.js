@@ -51,7 +51,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
   return null;
 }
 
-async function run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName }) {
+async function run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName, isApi }) {
   const programOnlyActions = ['createProgram', 'updateProgram'];
   const actionProductSlug = programOnlyActions.includes(action) ? 'cm/programs' : productSlug;
 
@@ -99,7 +99,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
     // 4) Sign in
     try {
-      await signIn(page, email, password, currentProductSlug, env);
+      await signIn(page, email, password, currentProductSlug, env, isApi);
     } catch (error) {
       console.error('\n❌', error.message);
       await browser.close();
@@ -178,7 +178,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
       desiredSlug = 'sm/section-dashboard';
     }
     try {
-      await signIn(page, email, password, desiredSlug, env);
+      await signIn(page, email, password, desiredSlug, env, isApi);
     } catch (error) {
       console.error('\n❌', error.message);
       await browser.close();
