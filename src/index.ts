@@ -1,9 +1,8 @@
-#!/usr/bin/env node
 import run from './run';
 
 const { gatherInputs } = require('./input');
 
-; (async () => {
+async function runCli() {
   try {
     // 0) Inputs
     const { email, password, env, productSlug, schoolId, action, courseFormName, programFormName } = gatherInputs();
@@ -13,4 +12,10 @@ const { gatherInputs } = require('./input');
   } catch (err) {
     console.error('❌ Unhandled error:', err);
   }
-})();
+};
+
+export {
+  run,
+  runCli
+};
+
