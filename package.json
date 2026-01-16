@@ -5,6 +5,7 @@
   "main": "main.js",
   "bin": "main.js",
   "scripts": {
+    "build": "tsc",
     "start": "ts-node main.js",
     "install-browsers": "npx playwright install",
     "run": "ts-node main.js"
