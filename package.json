@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "start": "ts-node main.js",
+    "start-api-localhost": "ts-node main-api-localhost.js",
     "install-browsers": "npx playwright install",
     "run": "ts-node main.js"
   },
