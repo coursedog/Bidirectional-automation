@@ -1,17 +1,20 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { dismissReleaseNotesPopup, signIn } from './auth';
+import { seedContext } from './context';
+import { createCourse, updateCourse } from './courseTemplateFill';
+import { getSchoolTemplate } from './getSchoolTemplate';
+import { startMergeReportPolling } from './mergeReportPoller';
+import { performPreflightChecks } from './preflightChecks';
+import { createProgram, updateProgram } from './programTemplateFill';
+import { appendRunSummary, generateRunId } from './runSummary';
+import { captureModalAfter, captureModalBefore, createSection, openSection } from './section-screenshot';
+import { bannerEthosScheduleType, ensureRunLogger, fillBaselineTemplate, meetAndProfDetails, relationshipsFill, saveSection, validateAndResetMeetingPatterns, validateAndResetProfessors } from './sectionTemplateFill';
+import ConsoleLogger from './services/ConsoleLogger';
+import type { ILogger } from './services/interfaces/ILogger';
+
 const { launch } = require('./browser');
-const { seedContext } = require('./context');
-const { signIn, dismissReleaseNotesPopup } = require('./auth');
 const { goToProduct } = require('./navigation');
-const { openSection, createSection, captureModalBefore, captureModalAfter } = require('./section-screenshot');
-const { getSchoolTemplate } = require('./getSchoolTemplate');
-const { fillBaselineTemplate, saveSection, validateAndResetMeetingPatterns, validateAndResetProfessors, readSectionValues, relationshipsFill, bannerEthosScheduleType, meetAndProfDetails, ensureRunLogger } = require('./sectionTemplateFill');
-const { createCourse, updateCourse } = require('./courseTemplateFill');
-const { createProgram, updateProgram } = require('./programTemplateFill');
-const { startMergeReportPolling } = require('./mergeReportPoller');
-const { appendRunSummary, generateRunId } = require('./runSummary');
-const { performPreflightChecks } = require('./preflightChecks');
 //const { runComputerUseAgent } = require('./agent');
 
 // Session-based course tracking system
@@ -51,7 +54,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
   return null;
 }
 
-async function run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName, isApi }) {
+async function run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName, isApi, logger = new ConsoleLogger() }) {
   const programOnlyActions = ['createProgram', 'updateProgram'];
   const actionProductSlug = programOnlyActions.includes(action) ? 'cm/programs' : productSlug;
 
@@ -61,26 +64,26 @@ async function run({ email, password, env, productSlug, schoolId, action, course
   const debugVideoDir = ensureDebugVideoFolder();
 
   // 1) Get API token
-  console.log('\n🔐 Getting API token...');
-  const token = await getSchoolTemplate({ email, password }, env, schoolId);
-  console.log('📋 Token:', token);
+  logger.log('\n🔐 Getting API token...');
+  const token = await getSchoolTemplate({ email, password }, env, schoolId, logger);
+  logger.log('📋 Token:', token);
 
   // 2) Pre-flight checks
   try {
-    await performPreflightChecks(env, schoolId, token, actionProductSlug, action);
+    await performPreflightChecks(env, schoolId, token, actionProductSlug, action, logger);
   } catch (error) {
     // Pre-flight check failed - error message already displayed, exit gracefully
     process.exit(1);
   }
 
   // Helper to run a single flow with a pre-created run folder (for 'all' action)
-  async function runFlowInFolder(act, runFolder) {
+  async function runFlowInFolder(act, runFolder, logger: ILogger) {
     const videoName = `${schoolId}-${act}-debugging-run`;
     // 2) Browser & Context (with video recording)
     // Launch in headed mode for potential user takeover, but minimized initially
     const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, isApi ? true : false);
     // 3) Seed cookies & localStorage
-    await seedContext(ctx, baseDomain, email, schoolId);
+    await seedContext(ctx, baseDomain, email, schoolId, logger);
 
     // Determine the correct product slug based on the action
     const courseActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'courseAll'];
@@ -99,15 +102,15 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
     // 4) Sign in
     try {
-      await signIn(page, email, password, currentProductSlug, env, isApi);
+      await signIn(page, email, password, currentProductSlug, env, isApi, logger);
     } catch (error) {
-      console.error('\n❌', error.message);
+      logger.error('\n❌', error.message);
       await browser.close();
       process.exit(1);
     }
     // 5) Navigate into product
     await goToProduct(page, currentProductSlug, env);
-    await dismissReleaseNotesPopup(page);
+    await dismissReleaseNotesPopup(page, logger);
 
     // Optional: hand control to computer-use agent if AGENT_MODE is set
     // if (process.env.AGENT_MODE === '1') {
@@ -134,7 +137,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     }
 
     if (alertVisible) {
-      console.log('\nA sections nightly merge for this school is currently in progress, please try again later.');
+      logger.log('\nA sections nightly merge for this school is currently in progress, please try again later.');
       await browser.close();
       process.exit(0); // Exit gracefully
     }
@@ -151,21 +154,21 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
     // Continue with the same logic as runFlow but using the shared run folder
     const actionFormName = getFormNameForAction(act, courseFormName, programFormName);
-    await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, actionFormName);
+    await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, actionFormName, logger);
   }
 
   // Helper to run a single flow, including browser setup/teardown
-  async function runFlow(act) {
+  async function runFlow(act, logger: ILogger) {
     // Reset session course tracking for new run
     global.sessionUsedCourses.clear();
-    console.log(`🔄 Reset session course tracking for new run`);
+    logger.log(`🔄 Reset session course tracking for new run`);
 
     const videoName = `${schoolId}-${act}-debugging-run`;
     // 2) Browser & Context (with video recording)
     // Launch in headed mode for potential user takeover, but minimized initially
     const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, isApi ? true : false);
     // 3) Seed cookies & localStorage
-    await seedContext(ctx, baseDomain, email, schoolId);
+    await seedContext(ctx, baseDomain, email, schoolId, logger);
     // 4) Sign in
     let desiredSlug = productSlug;
     const courseOnlyActions = ['updateCourse', 'inactivateCourse', 'newCourseRevision', 'createCourse', 'courseAll'];
@@ -178,15 +181,15 @@ async function run({ email, password, env, productSlug, schoolId, action, course
       desiredSlug = 'sm/section-dashboard';
     }
     try {
-      await signIn(page, email, password, desiredSlug, env, isApi);
+      await signIn(page, email, password, desiredSlug, env, isApi, logger);
     } catch (error) {
-      console.error('\n❌', error.message);
+      logger.error('\n❌', error.message);
       await browser.close();
       process.exit(1);
     }
     // 5) Navigate into product
     await goToProduct(page, desiredSlug, env);
-    await dismissReleaseNotesPopup(page);
+    await dismissReleaseNotesPopup(page, logger);
 
     // Optional: hand control to computer-use agent if AGENT_MODE is set
     //if (process.env.AGENT_MODE === '1') {
@@ -213,7 +216,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     }
 
     if (alertVisible) {
-      console.log('\nA sections nightly merge for this school is currently in progress, please try again later.');
+      logger.log('\nA sections nightly merge for this school is currently in progress, please try again later.');
       await browser.close();
       process.exit(0); // Exit gracefully
     }
@@ -225,7 +228,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     const runFolder = path.join(outputDir, `Run-${dateStr}`);
     fs.mkdirSync(runFolder, { recursive: true });
 
-    console.log(`\n🚀 Starting "${act}" run in folder: ${runFolder}`);
+    logger.log(`\n🚀 Starting "${act}" run in folder: ${runFolder}`);
 
     // Create product and method-specific subfolder within the run folder
     const productFolder = getProductFolder(act);
@@ -233,15 +236,15 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     fs.mkdirSync(subfolder, { recursive: true });
 
     // Initialize run-scoped logger for this action subfolder before any further logs
-    try { ensureRunLogger(subfolder); } catch (_) { }
+    try { ensureRunLogger(subfolder, logger); } catch (_) { }
 
     // Execute the action
     const actionFormName = getFormNameForAction(act, courseFormName, programFormName);
-    await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, actionFormName);
+    await executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, actionFormName, logger);
   }
 
   // Helper function to log failed runs to summary
-  async function logFailedRun(runFolder, act, schoolId, reason) {
+  async function logFailedRun(runFolder, act, schoolId, reason, logger: ILogger) {
     try {
       const runId = generateRunId(act);
       const currentDate = new Date().toISOString();
@@ -254,274 +257,276 @@ async function run({ email, password, env, productSlug, schoolId, action, course
         currentDate,
         schoolId,
         act,
-        'N/A' // errors parameter for failed runs
+        'N/A', // errors parameter for failed runs
+        logger,
       );
     } catch (error) {
-      console.error('❌ Failed to log failed run to summary:', error.message);
+      logger.error('❌ Failed to log failed run to summary:', error.message);
     }
   }
 
   // Shared function to execute actions
-  async function executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, formName) {
+  async function executeAction(act, page, browser, subfolder, env, schoolId, baseDomain, dateStr, formName, logger: ILogger) {
     if (act === 'update') {
       // Begin update process (dashboard already filtered to enrollment=0)
-      await console.log('\n📝 Initiating Section update process...');
+      logger.log('\n📝 Initiating Section update process...');
+
       try {
-        await openSection(page);
+        await openSection(page, logger);
       } catch (error) {
-        console.log(`❌ [Update] ${error.message}`);
-        console.log('❌ [Update] Ending update flow due to no available sections.');
+        logger.log(`❌ [Update] ${error.message}`);
+        logger.log('❌ [Update] Ending update flow due to no available sections.');
         await browser.close();
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'No available sections to update');
+        await logFailedRun(runFolder, act, schoolId, 'No available sections to update', logger);
         return; // Exit the function early
       }
-      await captureModalBefore(page, subfolder, 'update');
+      await captureModalBefore(page, subfolder, 'update', logger);
       // Capture details "before" screenshots for Meeting Patterns & Instructor
-      try { await meetAndProfDetails(page, subfolder, 'update'); } catch (_) { }
-      console.log('\n📝 Filling section template fields...');
-      await fillBaselineTemplate(page, schoolId, 'update');
+      try { await meetAndProfDetails(page, subfolder, 'update', logger); } catch (_) { }
+      logger.log('\n📝 Filling section template fields...');
+      await fillBaselineTemplate(page, schoolId, 'update', undefined, undefined, logger);
       // Call bannerEthosScheduleType for banner_ethos schools
       if (schoolId.includes('banner_ethos')) {
-        await bannerEthosScheduleType(page);
+        await bannerEthosScheduleType(page, logger);
       }
-      await validateAndResetMeetingPatterns(page, subfolder, 'update');
-      let saveSuccess = await validateAndResetProfessors(page, subfolder, 'update', browser, schoolId, null, dateStr);
+      await validateAndResetMeetingPatterns(page, subfolder, 'update', logger);
+      let saveSuccess = await validateAndResetProfessors(page, subfolder, 'update', browser, schoolId, null, dateStr, logger);
 
       // Log the save result
       if (saveSuccess) {
-        console.log('\n📝 Section was saved successfully.');
+        logger.log('\n📝 Section was saved successfully.');
       } else {
-        console.log('\n📝 Section was not saved.');
+        logger.log('\n📝 Section was not saved.');
       }
       // saveSuccess is now set by validateAndResetProfessors which handles saving internally
       await browser.close();
       if (saveSuccess) {
-        await startMergeReportPolling(env, schoolId, act, subfolder);
+        await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
       } else {
-        console.log("Couldn't save section, thus cannot pull merge report");
+        logger.log("Couldn't save section, thus cannot pull merge report");
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'Failed to save section');
+        await logFailedRun(runFolder, act, schoolId, 'Failed to save section', logger);
       }
     } else if (act === 'create') {
-      await console.log('\n Initiating create Section with Meeting and Professor process...');
-      await createSection(page);
-      console.log('\n📝 Filling section template fields...');
-      await fillBaselineTemplate(page, schoolId, 'create');
+      await logger.log('\n Initiating create Section with Meeting and Professor process...');
+      await createSection(page, undefined, logger);
+      logger.log('\n📝 Filling section template fields...');
+      await fillBaselineTemplate(page, schoolId, 'create', undefined, undefined, logger);
       // Call bannerEthosScheduleType for banner_ethos schools
       if (schoolId.includes('banner_ethos')) {
-        await bannerEthosScheduleType(page);
+        await bannerEthosScheduleType(page, logger);
       }
-      await validateAndResetMeetingPatterns(page, subfolder, 'create');
-      let saveSuccess = await validateAndResetProfessors(page, subfolder, 'create', browser, schoolId, null, dateStr);
+      await validateAndResetMeetingPatterns(page, subfolder, 'create', logger);
+      let saveSuccess = await validateAndResetProfessors(page, subfolder, 'create', browser, schoolId, null, dateStr, logger);
       await browser.close();
       if (saveSuccess) {
-        await startMergeReportPolling(env, schoolId, act, subfolder);
+        await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
       } else {
-        console.log("Couldn't save section, thus cannot pull merge report");
+        logger.log("Couldn't save section, thus cannot pull merge report");
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'Failed to save section');
+        await logFailedRun(runFolder, act, schoolId, 'Failed to save section', logger);
       }
     } else if (act === 'createNoMeetNoProf') {
-      await console.log('\n Initiating create Section wit no Meeting or Professor process...');
-      await createSection(page);
-      console.log('\n📝 Filling section template fields (no meeting/prof)...');
+      await logger.log('\n Initiating create Section wit no Meeting or Professor process...');
+      await createSection(page, undefined, logger);
+      logger.log('\n📝 Filling section template fields (no meeting/prof)...');
       // First, fill baseline fields without saving to allow all sections to render
-      await fillBaselineTemplate(page, schoolId, 'createNoMeetNoProf');
+      await fillBaselineTemplate(page, schoolId, 'createNoMeetNoProf', undefined, undefined, logger);
       // Now adjust Banner Ethos Schedule Type after fields are rendered
       if (schoolId.includes('banner_ethos')) {
-        await bannerEthosScheduleType(page);
+        await bannerEthosScheduleType(page, logger);
       }
       // Take the after screenshot and save explicitly
-      await captureModalAfter(page, subfolder, 'createNoMeetNoProf');
-      let saveSuccess = await saveSection(page, subfolder, 'createNoMeetNoProf', browser, schoolId);
+      await captureModalAfter(page, subfolder, 'createNoMeetNoProf', logger);
+      let saveSuccess = await saveSection(page, subfolder, 'createNoMeetNoProf', browser, schoolId, logger);
       await browser.close();
       if (saveSuccess) {
-        await startMergeReportPolling(env, schoolId, act, subfolder);
+        await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
       } else {
-        console.log("Couldn't save section, thus cannot pull merge report");
+        logger.log("Couldn't save section, thus cannot pull merge report");
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'Failed to save section');
+        await logFailedRun(runFolder, act, schoolId, 'Failed to save section', logger);
       }
     } else if (act === 'editRelationships') {
-      await console.log('\n🔗 Initiating Relationships edit process...');
-      let result = await relationshipsFill(baseDomain, page, subfolder, 'editRelationships', schoolId, false, browser);
+      await logger.log('\n🔗 Initiating Relationships edit process...');
+      let result = await relationshipsFill(baseDomain, page, subfolder, 'editRelationships', schoolId, false, browser, logger);
       await browser.close();
 
       if (result === 'edit_completed' || result === true) {
-        await startMergeReportPolling(env, schoolId, act, subfolder);
+        await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
       } else {
-        console.log('❌ Relationships edit process failed.');
+        logger.log('❌ Relationships edit process failed.');
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'Relationships edit process failed');
+        await logFailedRun(runFolder, act, schoolId, 'Relationships edit process failed', logger);
       }
     } else if (act === 'createRelationships') {
-      await console.log('\n🔗 Initiating Relationships creation process...');
-      let result = await relationshipsFill(baseDomain, page, subfolder, 'createRelationships', schoolId, true, browser);
+      await logger.log('\n🔗 Initiating Relationships creation process...');
+      let result = await relationshipsFill(baseDomain, page, subfolder, 'createRelationships', schoolId, true, browser, logger);
       await browser.close();
 
       if (result === true) {
-        await startMergeReportPolling(env, schoolId, act, subfolder);
+        await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
       } else {
-        console.log('❌ Relationships create process failed.');
+        logger.log('❌ Relationships create process failed.');
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'Relationships create process failed');
+        await logFailedRun(runFolder, act, schoolId, 'Relationships create process failed', logger);
       }
     } else if (act === 'inactivateSection') {
-      await console.log('\n Initiating Section inactivation process...');
+      await logger.log('\n Initiating Section inactivation process...');
       try {
-        await openSection(page);
+        await openSection(page, logger);
       } catch (error) {
-        console.log(`❌ [InactivateSection] ${error.message}`);
-        console.log('❌ [InactivateSection] Ending inactivation flow due to no available sections.');
+        logger.log(`❌ [InactivateSection] ${error.message}`);
+        logger.log('❌ [InactivateSection] Ending inactivation flow due to no available sections.');
         await browser.close();
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'No available sections to inactivate');
+        await logFailedRun(runFolder, act, schoolId, 'No available sections to inactivate', logger);
         return; // Exit the function early
       }
-      await captureModalBefore(page, subfolder, 'inactivateSection');
+      await captureModalBefore(page, subfolder, 'inactivateSection', logger);
 
-      console.log('\n📝 Filling section template fields...');
+      logger.log('\n📝 Filling section template fields...');
       // fillBaselineTemplate will handle screenshot and save internally for this action
-      let saveSuccess = await fillBaselineTemplate(page, schoolId, 'inactivateSection', subfolder, browser);
+      let saveSuccess = await fillBaselineTemplate(page, schoolId, 'inactivateSection', subfolder, browser, logger);
 
       await browser.close();
       if (saveSuccess) {
-        await startMergeReportPolling(env, schoolId, act, subfolder);
+        await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
       } else {
-        console.log("Couldn't save section, thus cannot pull merge report");
+        logger.log("Couldn't save section, thus cannot pull merge report");
         // Log failed run to summary
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, 'Failed to save section');
+        await logFailedRun(runFolder, act, schoolId, 'Failed to save section', logger);
       }
     } else if (act === 'updateCourse') {
-      await console.log('\n📚 Initiating Course update process...');
+      await logger.log('\n📚 Initiating Course update process...');
       try {
-        const success = await updateCourse(page, subfolder, schoolId, browser, 'updateCourse');
+        const success = await updateCourse(page, subfolder, schoolId, browser, 'updateCourse', logger);
         await browser.close();
 
         if (success) {
-          console.log('✅ Course update completed successfully');
-          await startMergeReportPolling(env, schoolId, act, subfolder);
+          logger.log('✅ Course update completed successfully');
+          await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
         } else {
-          console.log('❌ Course update process failed');
+          logger.log('❌ Course update process failed');
           const runFolder = path.dirname(subfolder);
-          await logFailedRun(runFolder, act, schoolId, 'Course update process failed');
+          await logFailedRun(runFolder, act, schoolId, 'Course update process failed', logger);
         }
       } catch (error) {
-        console.log(`❌ [UpdateCourse] ${error.message}`);
+        logger.log(`❌ [UpdateCourse] ${error.message}`);
         await browser.close();
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, `Course update error: ${error.message}`);
+        await logFailedRun(runFolder, act, schoolId, `Course update error: ${error.message}`, logger);
       }
     } else if (act === 'updateProgram') {
-      await console.log('\n📚 Initiating Program update process...');
+      await logger.log('\n📚 Initiating Program update process...');
       try {
-        const success = await updateProgram(page, subfolder, schoolId, browser);
+        const success = await updateProgram(page, subfolder, schoolId, browser, logger);
         await browser.close();
 
         if (success) {
-          console.log('✅ Program update completed successfully');
-          await startMergeReportPolling(env, schoolId, act, subfolder);
+          logger.log('✅ Program update completed successfully');
+          await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
         } else {
-          console.log('❌ Program update process failed');
+          logger.log('❌ Program update process failed');
           const runFolder = path.dirname(subfolder);
-          await logFailedRun(runFolder, act, schoolId, 'Program update process failed');
+          await logFailedRun(runFolder, act, schoolId, 'Program update process failed', logger);
         }
       } catch (error) {
-        console.log(`❌ [UpdateProgram] ${error.message}`);
+        logger.log(`❌ [UpdateProgram] ${error.message}`);
         await browser.close();
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, `Program update error: ${error.message}`);
+        await logFailedRun(runFolder, act, schoolId, `Program update error: ${error.message}`, logger);
       }
     } else if (act === 'inactivateCourse') {
-      await console.log('\n📚 Initiating Course inactivation process...');
+      await logger.log('\n📚 Initiating Course inactivation process...');
       try {
-        const success = await updateCourse(page, subfolder, schoolId, browser, 'inactivateCourse');
+        const success = await updateCourse(page, subfolder, schoolId, browser, 'inactivateCourse', logger);
         await browser.close();
 
         if (success) {
-          console.log('✅ Course inactivation completed successfully');
-          await startMergeReportPolling(env, schoolId, act, subfolder);
+          logger.log('✅ Course inactivation completed successfully');
+          await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
         } else {
-          console.log('❌ Course inactivation process failed');
+          logger.log('❌ Course inactivation process failed');
           const runFolder = path.dirname(subfolder);
-          await logFailedRun(runFolder, act, schoolId, 'Course inactivation process failed');
+          await logFailedRun(runFolder, act, schoolId, 'Course inactivation process failed', logger);
         }
       } catch (error) {
-        console.log(`❌ [InactivateCourse] ${error.message}`);
+        logger.log(`❌ [InactivateCourse] ${error.message}`);
         await browser.close();
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, `Course inactivation error: ${error.message}`);
+        await logFailedRun(runFolder, act, schoolId, `Course inactivation error: ${error.message}`, logger);
       }
     } else if (act === 'newCourseRevision') {
-      await console.log('\n📚 Initiating Course revision process...');
+      await logger.log('\n📚 Initiating Course revision process...');
       try {
-        const success = await updateCourse(page, subfolder, schoolId, browser, 'newCourseRevision');
+        const success = await updateCourse(page, subfolder, schoolId, browser, 'newCourseRevision', logger);
         await browser.close();
 
         if (success) {
-          console.log('✅ Course revision completed successfully');
-          await startMergeReportPolling(env, schoolId, act, subfolder);
+          logger.log('✅ Course revision completed successfully');
+          await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
         } else {
-          console.log('❌ Course revision failed');
+          logger.log('❌ Course revision failed');
           const runFolder = path.dirname(subfolder);
-          await logFailedRun(runFolder, act, schoolId, 'Course revision failed during execution');
+          await logFailedRun(runFolder, act, schoolId, 'Course revision failed during execution', logger);
         }
       } catch (error) {
-        console.log(`❌ Course revision error: ${error.message}`);
+        logger.log(`❌ Course revision error: ${error.message}`);
         await browser.close();
 
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, `Course revision error: ${error.message}`);
+        await logFailedRun(runFolder, act, schoolId, `Course revision error: ${error.message}`, logger);
       }
     } else if (act === 'createCourse') {
-      await console.log('\n📚 Initiating Course creation process...');
+      await logger.log('\n📚 Initiating Course creation process...');
       try {
-        const success = await createCourse(page, subfolder, schoolId, browser, formName);
+        const success = await createCourse(page, subfolder, schoolId, browser, formName, logger);
         await browser.close();
 
         if (success) {
-          console.log('✅ Course creation completed successfully');
-          await startMergeReportPolling(env, schoolId, act, subfolder);
+          logger.log('✅ Course creation completed successfully');
+          await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
         } else {
-          console.log('❌ Course creation failed');
+          logger.log('❌ Course creation failed');
           const runFolder = path.dirname(subfolder);
-          await logFailedRun(runFolder, act, schoolId, 'Course creation failed during execution');
+          await logFailedRun(runFolder, act, schoolId, 'Course creation failed during execution', logger);
         }
       } catch (error) {
-        console.log(`❌ Course creation error: ${error.message}`);
+        logger.log(`❌ Course creation error: ${error.message}`);
         await browser.close();
 
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, `Course creation error: ${error.message}`);
+        await logFailedRun(runFolder, act, schoolId, `Course creation error: ${error.message}`, logger);
       }
     } else if (act === 'createProgram') {
-      await console.log('\n📚 Initiating Program creation process...');
+      await logger.log('\n📚 Initiating Program creation process...');
       try {
-        const success = await createProgram(page, subfolder, schoolId, browser, formName);
+        const success = await createProgram(page, subfolder, schoolId, browser, formName, logger);
         await browser.close();
 
         if (success) {
-          console.log('✅ Program creation completed successfully');
-          await startMergeReportPolling(env, schoolId, act, subfolder);
+          logger.log('✅ Program creation completed successfully');
+          await startMergeReportPolling(env, schoolId, act, subfolder, undefined, logger);
         } else {
-          console.log('❌ Program creation failed');
+          logger.log('❌ Program creation failed');
           const runFolder = path.dirname(subfolder);
-          await logFailedRun(runFolder, act, schoolId, 'Program creation failed during execution');
+          await logFailedRun(runFolder, act, schoolId, 'Program creation failed during execution', logger);
         }
       } catch (error) {
-        console.log(`❌ [CreateProgram] ${error.message}`);
+        logger.log(`❌ [CreateProgram] ${error.message}`);
         await browser.close();
         const runFolder = path.dirname(subfolder);
-        await logFailedRun(runFolder, act, schoolId, `Program creation error: ${error.message}`);
+        await logFailedRun(runFolder, act, schoolId, `Program creation error: ${error.message}`, logger);
       }
     }
   }
@@ -534,14 +539,14 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     const sharedRunFolder = path.join(outputDir, `Run-${dateStr}`);
     fs.mkdirSync(sharedRunFolder, { recursive: true });
 
-    console.log(`\n🚀 Starting "All Section Test Cases" run in folder: ${sharedRunFolder}`);
+    logger.log(`\n🚀 Starting "All Section Test Cases" run in folder: ${sharedRunFolder}`);
 
-    await runFlowInFolder('update', sharedRunFolder);
-    await runFlowInFolder('create', sharedRunFolder);
-    await runFlowInFolder('createNoMeetNoProf', sharedRunFolder);
-    await runFlowInFolder('editRelationships', sharedRunFolder);
-    await runFlowInFolder('createRelationships', sharedRunFolder);
-    await runFlowInFolder('inactivateSection', sharedRunFolder);
+    await runFlowInFolder('update', sharedRunFolder, logger);
+    await runFlowInFolder('create', sharedRunFolder, logger);
+    await runFlowInFolder('createNoMeetNoProf', sharedRunFolder, logger);
+    await runFlowInFolder('editRelationships', sharedRunFolder, logger);
+    await runFlowInFolder('createRelationships', sharedRunFolder, logger);
+    await runFlowInFolder('inactivateSection', sharedRunFolder, logger);
   } else if (action === 'courseAll') {
     // Create a single Run folder for all course actions when running 'courseAll'
     const now = new Date();
@@ -552,14 +557,14 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
     // Reset session course tracking for new run
     global.sessionUsedCourses.clear();
-    console.log(`🔄 Reset session course tracking for new run`);
+    logger.log(`🔄 Reset session course tracking for new run`);
 
-    console.log(`\n🚀 Starting "All Course Test Cases" run in folder: ${sharedRunFolder}`);
+    logger.log(`\n🚀 Starting "All Course Test Cases" run in folder: ${sharedRunFolder}`);
 
-    await runFlowInFolder('updateCourse', sharedRunFolder);
-    await runFlowInFolder('inactivateCourse', sharedRunFolder);
-    await runFlowInFolder('newCourseRevision', sharedRunFolder);
-    await runFlowInFolder('createCourse', sharedRunFolder);
+    await runFlowInFolder('updateCourse', sharedRunFolder, logger);
+    await runFlowInFolder('inactivateCourse', sharedRunFolder, logger);
+    await runFlowInFolder('newCourseRevision', sharedRunFolder, logger);
+    await runFlowInFolder('createCourse', sharedRunFolder, logger);
   } else if (action === 'both') {
     // Create a single Run folder for all actions from both products when running 'both'
     const now = new Date();
@@ -570,27 +575,27 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
     // Reset session course tracking for new run
     global.sessionUsedCourses.clear();
-    console.log(`🔄 Reset session course tracking for new run`);
+    logger.log(`🔄 Reset session course tracking for new run`);
 
-    console.log(`\n🚀 Starting "Both Products - All Test Cases" run in folder: ${sharedRunFolder}`);
+    logger.log(`\n🚀 Starting "Both Products - All Test Cases" run in folder: ${sharedRunFolder}`);
 
     // First run all Academic Scheduling actions
-    console.log('\n📚 Running Academic Scheduling Test Cases...');
-    await runFlowInFolder('update', sharedRunFolder);
-    await runFlowInFolder('create', sharedRunFolder);
-    await runFlowInFolder('createNoMeetNoProf', sharedRunFolder);
-    await runFlowInFolder('editRelationships', sharedRunFolder);
-    await runFlowInFolder('createRelationships', sharedRunFolder);
-    await runFlowInFolder('inactivateSection', sharedRunFolder);
+    logger.log('\n📚 Running Academic Scheduling Test Cases...');
+    await runFlowInFolder('update', sharedRunFolder, logger);
+    await runFlowInFolder('create', sharedRunFolder, logger);
+    await runFlowInFolder('createNoMeetNoProf', sharedRunFolder, logger);
+    await runFlowInFolder('editRelationships', sharedRunFolder, logger);
+    await runFlowInFolder('createRelationships', sharedRunFolder, logger);
+    await runFlowInFolder('inactivateSection', sharedRunFolder, logger);
 
     // Then run all Curriculum Management actions
-    console.log('\n📖 Running Curriculum Management Test Cases...');
-    await runFlowInFolder('updateCourse', sharedRunFolder);
-    await runFlowInFolder('inactivateCourse', sharedRunFolder);
-    await runFlowInFolder('newCourseRevision', sharedRunFolder);
-    await runFlowInFolder('createCourse', sharedRunFolder);
+    logger.log('\n📖 Running Curriculum Management Test Cases...');
+    await runFlowInFolder('updateCourse', sharedRunFolder, logger);
+    await runFlowInFolder('inactivateCourse', sharedRunFolder, logger);
+    await runFlowInFolder('newCourseRevision', sharedRunFolder, logger);
+    await runFlowInFolder('createCourse', sharedRunFolder, logger);
   } else {
-    await runFlow(action);
+    await runFlow(action, logger);
   }
 }
 

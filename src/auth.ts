@@ -1,12 +1,13 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import type { ILogger } from './services/interfaces/ILogger';
 
 function loginUrl(baseDomain, productSlug) {
   const baseUrl = `https://${baseDomain}`;
   return `${baseUrl}/#/login?continue=${encodeURIComponent(`/${productSlug}`)}`;
 }
 
-async function signIn(page, email, password, productSlug, env, isApi) {
+async function signIn(page, email, password, productSlug, env, isApi, logger: ILogger) {
   if (!isApi) {
     // Fallback to creds.json if email/password not provided
     if (!email || !password) {
@@ -24,7 +25,7 @@ async function signIn(page, email, password, productSlug, env, isApi) {
   const domain = env === 'prd' ? 'app.coursedog.com' : 'staging.coursedog.com';
   const url = loginUrl(domain, productSlug);
 
-  console.log('🔑 Signing in...');
+  logger.log('🔑 Signing in...');
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
   // Step 1: Enter email and proceed to password screen
@@ -56,7 +57,7 @@ async function signIn(page, email, password, productSlug, env, isApi) {
     ]);
 
     // If we reach here, navigation succeeded
-    console.log('✅ Successfully signed in');
+    logger.log('✅ Successfully signed in');
   } catch (error) {
     // Check if it's our password error
     if (error.message === 'PASSWORD_ERROR') {
@@ -78,9 +79,9 @@ async function signIn(page, email, password, productSlug, env, isApi) {
  * Dismiss the release notes popup if it appears after sign-in
  * @param {Object} page - Playwright page object
  */
-async function dismissReleaseNotesPopup(page) {
+async function dismissReleaseNotesPopup(page, logger: ILogger) {
   try {
-    console.log('🔍 Checking for release notes popup...');
+    logger.log('🔍 Checking for release notes popup...');
 
     // Target the button container instead of the SVG icon
     // Use waitFor with timeout to actually wait for popup to appear
@@ -90,18 +91,21 @@ async function dismissReleaseNotesPopup(page) {
     await releaseNotesPopup.waitFor({ state: 'visible', timeout: 3000 });
 
     // If we get here, popup is visible
-    console.log('📋 Release notes popup detected, dismissing...');
+    logger.log('📋 Release notes popup detected, dismissing...');
     await releaseNotesPopup.click();
     await page.waitForTimeout(500);
-    console.log('✅ Release notes popup dismissed');
+    logger.log('✅ Release notes popup dismissed');
   } catch (error) {
     // Popup didn't appear within timeout - this is fine, continue
     if (error.message.includes('Timeout')) {
-      console.log('✅ No release notes popup detected');
+      logger.log('✅ No release notes popup detected');
     } else {
-      console.log('⚠️ Error checking for release notes popup:', error.message);
+      logger.log('⚠️ Error checking for release notes popup:', error.message);
     }
   }
 }
 
-module.exports = { signIn, dismissReleaseNotesPopup }; 
+export {
+  dismissReleaseNotesPopup, signIn
+};
+

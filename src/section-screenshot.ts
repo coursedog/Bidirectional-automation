@@ -1,4 +1,5 @@
-const path = require('path');
+import path from 'path';
+import type { ILogger } from './services/interfaces/ILogger';
 
 async function screenshotSectionModal(page, outputPath, rootSelector = 'div.modal-dialog') {
   // Make containers expand and avoid clipping/scrolling
@@ -105,25 +106,25 @@ async function screenshotSectionModal(page, outputPath, rootSelector = 'div.moda
   try { await page.evaluate((styleEl) => { try { styleEl && styleEl.remove && styleEl.remove(); } catch (_) { } }, styleHandle); } catch (_) { }
 }
 
-async function openSection(page) {
-  console.log('\n✅ Clicking on Section');
+async function openSection(page, logger: ILogger) {
+  logger.log('\n✅ Clicking on Section');
 
   try {
     // First, try to find a section with no conflicts
-    console.log('🔍 Looking for sections with no conflicts...');
+    logger.log('🔍 Looking for sections with no conflicts...');
     await page.waitForSelector('[aria-label="This section has no conflicts."]', { state: 'visible', timeout: 10000 });
     await page.click('[aria-label="This section has no conflicts."]');
-    console.log('✅ Found and clicked on section with no conflicts');
+    logger.log('✅ Found and clicked on section with no conflicts');
   } catch (error) {
-    console.log('⚠️ No sections without conflicts found, looking for sections with conflicts...');
+    logger.log('⚠️ No sections without conflicts found, looking for sections with conflicts...');
 
     try {
       // Fallback: look for sections with conflicts
       await page.waitForSelector('[aria-label="This section has conflicts."]', { state: 'visible', timeout: 10000 });
       await page.click('[aria-label="This section has conflicts."]');
-      console.log('✅ Found and clicked on section with conflicts');
+      logger.log('✅ Found and clicked on section with conflicts');
     } catch (fallbackError) {
-      console.log('❌ No sections found with either "no conflicts" or "conflicts" aria-labels');
+      logger.log('❌ No sections found with either "no conflicts" or "conflicts" aria-labels');
       throw new Error('❌ No sections available for the selected term. Please run a merge for the current term and try again.');
     }
   }
@@ -131,14 +132,14 @@ async function openSection(page) {
   await page.waitForSelector('#section-modal-editor', { state: 'visible', timeout: 60000 });
 }
 
-async function createSection(page, searchTerm = 'a') {
-  console.log('▶ Opening Add Section modal');
+async function createSection(page, searchTerm = 'a', logger: ILogger) {
+  logger.log('▶ Opening Add Section modal');
   // 1) Click the top “Add Section” button
   await page.click('button[data-test="add-section-btn"]');
   // wait for the create-section modal to appear
   await page.waitForSelector('div.modal-dialog', { state: 'visible', timeout: 60000 });
 
-  console.log('▶ Activating course search dropdown');
+  logger.log('▶ Activating course search dropdown');
   // 2) Click the async-course-select wrapper (only in the modal)
   const picker = page.locator('div.modal-dialog div[data-test="async-course-select"]');
   await picker.click();
@@ -147,24 +148,24 @@ async function createSection(page, searchTerm = 'a') {
   const input = picker.locator('input.multiselect__input');
   await input.fill(searchTerm);
 
-  console.log('▶ Waiting for results to load…');
+  logger.log('▶ Waiting for results to load…');
   // 4) Wait for the *same* wrapper’s dropdown items, then click first
   const firstOption = picker.locator('.multiselect__content-wrapper li').first();
   await firstOption.waitFor({ state: 'visible', timeout: 60000 });
   await firstOption.click();
 
-  console.log('▶ Submitting Add Section');
+  logger.log('▶ Submitting Add Section');
   // 5) Click the bottom “ADD SECTION” and wait for the new Section editor
   await Promise.all([
     page.click('button[data-test="add-section-button"]'),
     page.waitForSelector('button[data-test="save-section-btn"]', { state: 'visible', timeout: 60000 })
   ]);
 
-  console.log('✅ Section editor is now open');
+  logger.log('✅ Section editor is now open');
 }
 
-async function captureModalBefore(page, outputDir, action) {
-  console.log('\n✅ Section loaded');
+async function captureModalBefore(page, outputDir, action, logger: ILogger) {
+  logger.log('\n✅ Section loaded');
 
   const hideBtn = page.locator('button[data-test="hide-sidebar-button"]');
   if (await hideBtn.isVisible()) {
@@ -178,11 +179,11 @@ async function captureModalBefore(page, outputDir, action) {
 
   const screenshotPath = path.join(outputDir, `${action}-section-modal-full-before.png`);
   await screenshotSectionModal(page, screenshotPath, 'div.modal-dialog');
-  console.log(`\n✅ Screenshot saved to ${screenshotPath}`);
+  logger.log(`\n✅ Screenshot saved to ${screenshotPath}`);
 }
 
-async function captureModalAfter(page, outputDir, action) {
-  console.log('\n✅ Section loaded');
+async function captureModalAfter(page, outputDir, action, logger: ILogger) {
+  logger.log('\n✅ Section loaded');
 
   const hideBtn = page.locator('button[data-test="hide-sidebar-button"]');
   if (await hideBtn.count() > 0) {
@@ -191,22 +192,29 @@ async function captureModalAfter(page, outputDir, action) {
       await page.waitForTimeout(300);
     }
   } else {
-    console.log('⚠️ Could not find the hide sidebar button, continuing...');
+    logger.log('⚠️ Could not find the hide sidebar button, continuing...');
   }
 
   await page.waitForSelector('button[data-test="save-section-btn"]', { state: 'visible', timeout: 60000 });
   await page.waitForTimeout(300);
   const screenshotPath = path.join(outputDir, `${action}-section-modal-full-after.png`);
   await screenshotSectionModal(page, screenshotPath, 'div.modal-dialog');
-  console.log(`\n✅ Screenshot saved to ${screenshotPath}`);
+  logger.log(`\n✅ Screenshot saved to ${screenshotPath}`);
 }
 
-async function captureModalError(page, outputDir, action) {
-  console.log('\nTaking Screenshot of the error for debugging');
+async function captureModalError(page, outputDir, action, logger: ILogger) {
+  logger.log('\nTaking Screenshot of the error for debugging');
 
   const screenshotPath = path.join(outputDir, `${action}-section-modal-full-error.png`);
   await screenshotSectionModal(page, screenshotPath, 'div.modal-dialog');
-  console.log(`\n✅ Screenshot saved to ${screenshotPath}`);
+  logger.log(`\n✅ Screenshot saved to ${screenshotPath}`);
 }
 
-module.exports = { openSection, createSection, captureModalBefore, captureModalAfter, captureModalError };
+export {
+  captureModalAfter,
+  captureModalBefore,
+  captureModalError,
+  createSection,
+  openSection
+};
+

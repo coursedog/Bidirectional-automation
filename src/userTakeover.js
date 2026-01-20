@@ -446,8 +446,9 @@ async function logErrorToRunSummary(runFolder, schoolId, action, errorType, erro
   }
 }
 
-module.exports = {
-  offerUserTakeover,
+export {
   askUserToRetry,
+  offerUserTakeover,
   waitForUserResponseWithTimeout
 };
+

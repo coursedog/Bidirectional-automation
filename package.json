@@ -1,6 +1,6 @@
 {
   "name": "@coursedog/coursedog-bidirectional-tests",
-  "version": "1.7.20",
+  "version": "1.7.21",
   "description": "Bi-directional Tests Automation Tool for Coursedog's Academic Scheduling and Curriculum Management products",
   "bin": "main.js",
   "main": "dist/index.js",

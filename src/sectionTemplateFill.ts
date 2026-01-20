@@ -1,20 +1,22 @@
 // sectionTemplateFill.js
 // Reads a client's Section template JSON and fills the modal fields in Playwright.
 
-const { captureModalError, captureModalAfter } = require('./section-screenshot');
+import fs from 'fs';
+import path from 'path';
+import { captureModalAfter, captureModalError } from './section-screenshot';
+import type { ILogger } from './services/interfaces/ILogger';
+import { offerUserTakeover, waitForUserResponseWithTimeout } from './userTakeover';
 
-const fs = require('fs');
-const path = require('path');
 // Simple run-scoped logger that mirrors console output to Logs.md in the run folder
-function ensureRunLogger(outputDir) {
+function ensureRunLogger(outputDir, logger: ILogger) {
   try {
     if (!outputDir) return;
     if (!global.__origConsole) {
       global.__origConsole = {
-        log: console.log,
-        warn: console.warn,
-        error: console.error,
-        info: console.info,
+        log: logger.log,
+        warn: logger.warn,
+        error: logger.error,
+        info: logger.info,
       };
       const forward = (method) => (...args) => {
         try {
@@ -28,10 +30,10 @@ function ensureRunLogger(outputDir) {
         } catch (_) { }
         try { global.__origConsole[method](...args); } catch (_) { }
       };
-      console.log = forward('log');
-      console.warn = forward('warn');
-      console.error = forward('error');
-      console.info = forward('info');
+      logger.log = forward('log');
+      logger.warn = forward('warn');
+      logger.error = forward('error');
+      logger.info = forward('info');
     }
     const logFile = path.join(outputDir, 'Logs.md');
     global.__runLogger = { logFile };
@@ -40,7 +42,6 @@ function ensureRunLogger(outputDir) {
     }
   } catch (_) { }
 }
-const { offerUserTakeover, waitForUserResponseWithTimeout } = require('./userTakeover');
 
 // Diff generation state shared across the flow to ensure we always produce one diff per run
 let __diffState = {
@@ -109,10 +110,10 @@ function isDeepEqual(a, b) {
   }
 }
 
-async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, action, dateStr) {
+async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, action, dateStr, logger: ILogger) {
   try {
     if (!beforeValues || !afterValues || !schoolId || !outputDir) return false;
-    ensureRunLogger(outputDir);
+    ensureRunLogger(outputDir, logger);
 
     // Build qid -> label map from latest section template
     let labelByQid = {};
@@ -123,7 +124,7 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
         const questions = (tpl && tpl.sectionTemplate && tpl.sectionTemplate.questions) || {};
         for (const [qid, q] of Object.entries(questions)) {
           if (q && typeof q === 'object') {
-            labelByQid[qid] = q.label || '';
+            labelByQid[qid] = (q as unknown as any).label || '';
           }
         }
       }
@@ -199,11 +200,11 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
     const diffFileName = `${schoolId}-${action}-field-differences-${dateStr || getTimestamp()}.txt`;
     const diffFilePath = path.join(outputDir, diffFileName);
     fs.writeFileSync(diffFilePath, diffText, 'utf8');
-    console.log(`\nDifferences saved to: ${diffFilePath}`);
+    logger.log(`\nDifferences saved to: ${diffFilePath}`);
     __diffState.wrote = true;
     return true;
   } catch (err) {
-    console.log(`⚠️  [Diff] Failed to write diff: ${err.message}`);
+    logger.log(`⚠️  [Diff] Failed to write diff: ${err.message}`);
     return false;
   }
 }
@@ -217,49 +218,49 @@ async function writeSectionDiff(beforeValues, afterValues, schoolId, outputDir, 
  * @param {Object} browser - Playwright browser object
  * @returns {Promise<boolean>} - True if template process completed successfully
  */
-async function restartSectionTemplateProcess(page, outputDir, action, schoolId, browser) {
+async function restartSectionTemplateProcess(page, outputDir, action, schoolId, browser, logger: ILogger) {
   try {
-    ensureRunLogger(outputDir);
-    console.log('\n🔄 RESTARTING SECTION TEMPLATE PROCESS');
-    console.log('═══════════════════════════════════════');
+    ensureRunLogger(outputDir, logger);
+    logger.log('\n🔄 RESTARTING SECTION TEMPLATE PROCESS');
+    logger.log('═══════════════════════════════════════');
 
     // Fill the section template with the new section
-    await fillBaselineTemplate(page, schoolId, action);
+    await fillBaselineTemplate(page, schoolId, action, undefined, undefined, logger);
 
     // Handle meeting patterns if present
     const meetingBtn = page.locator('[data-test="set-meeting-pattern-btn"]');
     if (await meetingBtn.count() > 0) {
-      console.log('📅 Processing meeting patterns for new section...');
-      await validateAndResetMeetingPatterns(page, outputDir, action);
+      logger.log('📅 Processing meeting patterns for new section...');
+      await validateAndResetMeetingPatterns(page, outputDir, action, logger);
     }
 
     // Handle instructors if present
     const profExpand = page.locator('[data-test="expandInstructorDetails"]');
     if (await profExpand.count() > 0) {
-      console.log('👤 Processing instructors for new section...');
-      await validateAndResetProfessors(page, outputDir, action, null, '', null, '');
+      logger.log('👤 Processing instructors for new section...');
+      await validateAndResetProfessors(page, outputDir, action, null, '', null, '', logger);
     }
 
     // Handle banner ethos schedule type if applicable
     if (schoolId.includes('banner_ethos')) {
-      console.log('🏫 Processing Banner Ethos schedule type for new section...');
-      await bannerEthosScheduleType(page);
+      logger.log('🏫 Processing Banner Ethos schedule type for new section...');
+      await bannerEthosScheduleType(page, logger);
     }
 
     // Attempt to save the new section
-    console.log('💾 Attempting to save new section...');
-    const saveResult = await saveSection(page, outputDir, action, browser, schoolId);
+    logger.log('💾 Attempting to save new section...');
+    const saveResult = await saveSection(page, outputDir, action, browser, schoolId, logger);
 
     if (saveResult) {
-      console.log('✅ New section template process completed successfully');
+      logger.log('✅ New section template process completed successfully');
       return true;
     } else {
-      console.log('⚠️ New section template process completed but save failed');
+      logger.log('⚠️ New section template process completed but save failed');
       return false;
     }
 
   } catch (error) {
-    console.error('❌ Error during section template restart:', error.message);
+    logger.error('❌ Error during section template restart:', error.message);
     return false;
   }
 }
@@ -270,8 +271,8 @@ async function restartSectionTemplateProcess(page, outputDir, action, schoolId, 
  * @param {import('playwright').Page} page    Playwright Page instance (modal must be open).
  * @param {string}               schoolId Identifier matching JSON file in Resources folder.
  */
-async function fillBaselineTemplate(page, schoolId, action, outputDir = null, browser = null) {
-  try { ensureRunLogger(outputDir); } catch (_) { }
+async function fillBaselineTemplate(page, schoolId, action, outputDir = null, browser = null, logger: ILogger) {
+  try { ensureRunLogger(outputDir, logger); } catch (_) { }
   // Load the template JSON
   const jsonPath = getLatestSectionTemplateFile(schoolId);
   const raw = fs.readFileSync(jsonPath, 'utf8');
@@ -316,7 +317,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
     try {
       // Skip specific fields
       if (skipFields.includes(qid)) {
-        console.log(`⏭️  Skipping restricted field: ${qid}`);
+        logger.log(`⏭️  Skipping restricted field: ${qid}`);
         continue;
       }
 
@@ -324,14 +325,14 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
       if (action !== 'update' && (qid === 'status' || qid === 'statusCode')) {
         // For inactivateSection, always edit these fields regardless of current value
         if (action === 'inactivateSection') {
-          console.log(`🔄 [${qid}] Processing inactivation field (bypassing existing value check)...`);
+          logger.log(`🔄 [${qid}] Processing inactivation field (bypassing existing value check)...`);
           // Continue to the special inactivateSection handling below
         } else {
           // Locate the wrapper by data-test attribute
           const wrapper = page.locator(`[data-test="${qid}"]`);
           const wrapperCount = await wrapper.count();
           if (wrapperCount === 0) {
-            console.log(`⚠️  [${qid}] No control found, skipping.`);
+            logger.log(`⚠️  [${qid}] No control found, skipping.`);
             continue;
           }
           // Check if this is a multiselect (has multiselect class or structure)
@@ -340,13 +341,13 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
             // Check if a value is already selected
             const selectedOptions = await wrapper.locator('.multiselect__tags .multiselect__tag, .multiselect__single').allTextContents();
             if (selectedOptions.length > 0 && selectedOptions[0].trim() !== '') {
-              console.log(`⏭️  [${qid}] Already has value '${selectedOptions[0]}', skipping edit.`);
+              logger.log(`⏭️  [${qid}] Already has value '${selectedOptions[0]}', skipping edit.`);
               continue;
             }
             // Empty: prefer selecting an Active status if available
-            const selectedActive = await selectActiveStatusIfEmpty(wrapper, page, qid);
+            const selectedActive = await selectActiveStatusIfEmpty(wrapper, page, qid, logger);
             if (selectedActive) {
-              console.log(`✅  [${qid}] Selected active status option.`);
+              logger.log(`✅  [${qid}] Selected active status option.`);
               continue;
             }
             // No value selected, proceed to select first option as normal
@@ -364,21 +365,21 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               const inputElement = input.first();
               let value = await inputElement.inputValue();
               if (value && value.trim() !== '') {
-                console.log(`⏭️  [${qid}] Already has value '${value}', skipping edit.`);
+                logger.log(`⏭️  [${qid}] Already has value '${value}', skipping edit.`);
                 continue;
               }
               // If this is a select and empty, prefer selecting an Active status if available
               const inputTagName = await inputElement.evaluate(el => el.tagName.toLowerCase());
               if (inputTagName === 'select') {
-                const selectedActive = await selectActiveStatusIfEmpty(wrapper, page, qid);
+                const selectedActive = await selectActiveStatusIfEmpty(wrapper, page, qid, logger);
                 if (selectedActive) {
-                  console.log(`✅  [${qid}] Selected active status option (select).`);
+                  logger.log(`✅  [${qid}] Selected active status option (select).`);
                   continue;
                 }
               }
               // No value, proceed to fill as normal
             } else {
-              console.log(`⚠️  [${qid}] No input found, skipping.`);
+              logger.log(`⚠️  [${qid}] No input found, skipping.`);
               continue;
             }
           }
@@ -388,13 +389,13 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
 
       // Special handling for status/statusCode in inactivateSection action
       if (action === 'inactivateSection' && (qid === 'status' || qid === 'statusCode')) {
-        console.log(`🔄 [${qid}] Processing inactivation field...`);
+        logger.log(`🔄 [${qid}] Processing inactivation field...`);
 
         // Locate the wrapper by data-test attribute
         const wrapper = page.locator(`[data-test="${qid}"]`);
         const wrapperCount = await wrapper.count();
         if (wrapperCount === 0) {
-          console.log(`⚠️  [${qid}] No control found, skipping.`);
+          logger.log(`⚠️  [${qid}] No control found, skipping.`);
           continue;
         }
 
@@ -402,7 +403,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
         const isMultiselect = await wrapper.locator('.multiselect, [class*="multiselect"]').count() > 0;
 
         if (isMultiselect) {
-          console.log(`🔽 [${qid}] Opening multiselect for inactivation options...`);
+          logger.log(`🔽 [${qid}] Opening multiselect for inactivation options...`);
           try {
             await wrapper.click();
             await page.waitForTimeout(2000); // Wait for dropdown to render
@@ -412,7 +413,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
             const optionCount = await options.count();
 
             if (optionCount === 0) {
-              console.log(`🚫 [${qid}] No options available in multiselect.`);
+              logger.log(`🚫 [${qid}] No options available in multiselect.`);
               continue;
             }
 
@@ -428,7 +429,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               }
             }
 
-            console.log(`📋 [${qid}] Available options: [${optionTexts.join(', ')}]`);
+            logger.log(`📋 [${qid}] Available options: [${optionTexts.join(', ')}]`);
 
             // Look for inactivation options in order: inact, ina, Cancel
             const inactivationKeywords = ['inact', 'ina', 'Cancel', 'C'];
@@ -447,13 +448,13 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
             }
 
             if (selectedOption) {
-              console.log(`✅ [${qid}] Found inactivation option: "${selectedOption}"`);
+              logger.log(`✅ [${qid}] Found inactivation option: "${selectedOption}"`);
               const targetOption = options.nth(selectedIndex);
               if (await targetOption.isVisible()) {
                 await targetOption.click();
-                console.log(`   ┗ Selected: "${selectedOption}"`);
+                logger.log(`   ┗ Selected: "${selectedOption}"`);
               } else {
-                console.log(`⚠️  [${qid}] Target option not visible, trying keyboard navigation...`);
+                logger.log(`⚠️  [${qid}] Target option not visible, trying keyboard navigation...`);
                 // Fallback: use keyboard navigation
                 const input = wrapper.locator('input.multiselect__input');
                 if (await input.count() > 0) {
@@ -463,19 +464,19 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                     await page.waitForTimeout(200);
                   }
                   await input.first().press('Enter');
-                  console.log(`   ┗ Selected via keyboard: "${selectedOption}"`);
+                  logger.log(`   ┗ Selected via keyboard: "${selectedOption}"`);
                 }
               }
             } else {
-              console.log(`⚠️  [${qid}] No suitable inactivation option found. Selecting first available option.`);
+              logger.log(`⚠️  [${qid}] No suitable inactivation option found. Selecting first available option.`);
               const firstOption = options.first();
               if (await firstOption.isVisible()) {
                 await firstOption.click();
-                console.log(`   ┗ Selected first available option: "${optionTexts[0]}"`);
+                logger.log(`   ┗ Selected first available option: "${optionTexts[0]}"`);
               }
             }
           } catch (err) {
-            console.log(`❌ [${qid}] Error processing multiselect: ${err.message}`);
+            logger.log(`❌ [${qid}] Error processing multiselect: ${err.message}`);
           }
         } else {
           // Handle regular select dropdown
@@ -489,14 +490,14 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
 
           const inputCount = await input.count();
           if (inputCount > 0) {
-            console.log(`🔽 [${qid}] Processing select dropdown for inactivation...`);
+            logger.log(`🔽 [${qid}] Processing select dropdown for inactivation...`);
 
             // Get all options
             const options = input.locator('option');
             const optionCount = await options.count();
 
             if (optionCount === 0) {
-              console.log(`🚫 [${qid}] No options available in select.`);
+              logger.log(`🚫 [${qid}] No options available in select.`);
               continue;
             }
 
@@ -512,7 +513,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               }
             }
 
-            console.log(`📋 [${qid}] Available options: [${optionTexts.join(', ')}]`);
+            logger.log(`📋 [${qid}] Available options: [${optionTexts.join(', ')}]`);
 
             // Look for inactivation options in order: inact, ina, Cancel
             const inactivationKeywords = ['inact', 'ina', 'Cancel'];
@@ -531,16 +532,16 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
             }
 
             if (selectedOption) {
-              console.log(`✅ [${qid}] Found inactivation option: "${selectedOption}"`);
+              logger.log(`✅ [${qid}] Found inactivation option: "${selectedOption}"`);
               await input.selectOption({ index: selectedIndex });
-              console.log(`   ┗ Selected: "${selectedOption}"`);
+              logger.log(`   ┗ Selected: "${selectedOption}"`);
             } else {
-              console.log(`⚠️  [${qid}] No suitable inactivation option found. Selecting first available option.`);
+              logger.log(`⚠️  [${qid}] No suitable inactivation option found. Selecting first available option.`);
               await input.selectOption({ index: 0 });
-              console.log(`   ┗ Selected first available option: "${optionTexts[0]}"`);
+              logger.log(`   ┗ Selected first available option: "${optionTexts[0]}"`);
             }
           } else {
-            console.log(`⚠️  [${qid}] No select dropdown found.`);
+            logger.log(`⚠️  [${qid}] No select dropdown found.`);
           }
         }
 
@@ -595,7 +596,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                   if (await hoursInput.count() > 0 && (await hoursInput.first().isEnabled().catch(() => true))) {
                     try { await hoursInput.first().scrollIntoViewIfNeeded(); } catch (_) { }
                     await hoursInput.first().fill(String(minVal));
-                    console.log(`   ┗ [${qid}] Auto-set from ${minQid} value "${minVal}" (banner)`);
+                    logger.log(`   ┗ [${qid}] Auto-set from ${minQid} value "${minVal}" (banner)`);
                     // Skip default handling for this qid since we've set it explicitly
                     continue;
                   }
@@ -612,7 +613,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
       // Note: Avoid evaluating wrapper HTML here. After selecting fields like Part Of Term,
       // the form can re-render and cause this to silently auto-wait, creating long pauses.
       if (wrapperCount === 0) {
-        console.log(`⚠️  [${qid}] No control found, skipping.`);
+        logger.log(`⚠️  [${qid}] No control found, skipping.`);
         continue;
       }
 
@@ -634,7 +635,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
 
         // Check if multiselect is disabled by class
         if (multiselectClass && multiselectClass.includes('multiselect--disabled')) {
-          console.log(`🚫 Multiselect for ${qid} is disabled, skipping.`);
+          logger.log(`🚫 Multiselect for ${qid} is disabled, skipping.`);
           continue;
         }
 
@@ -643,12 +644,12 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
         const isEnabled = await wrapper.first().isEnabled();
 
         if (!isVisible) {
-          console.log(`👁️ [${qid}] Multiselect not visible, skipping.`);
+          logger.log(`👁️ [${qid}] Multiselect not visible, skipping.`);
           continue;
         }
 
         if (!isEnabled) {
-          console.log(`🔒 [${qid}] Multiselect not enabled, skipping.`);
+          logger.log(`🔒 [${qid}] Multiselect not enabled, skipping.`);
           continue;
         }
 
@@ -678,7 +679,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
         };
 
         // Handle multiselect: click to open and pick the first visible, unselected option
-        console.log(`🔽 Processing multiselect for ${qid}`);
+        logger.log(`🔽 Processing multiselect for ${qid}`);
         try {
           await wrapper.click();
           await page.waitForTimeout(1000); // Wait for dropdown to render
@@ -766,7 +767,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
           }
           // Special logic for associatedClass: wait 3 seconds before selecting
           if (qid === 'associatedClass') {
-            console.log(`⏳ Waiting 3 seconds for ${qid} dropdown to fully load...`);
+            logger.log(`⏳ Waiting 3 seconds for ${qid} dropdown to fully load...`);
             await page.waitForTimeout(3000); // Wait 3 seconds for associatedClass dropdown
 
             // Get the section number value to use for associatedClass
@@ -780,27 +781,27 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                 if (tagName === 'input') {
                   // The wrapper itself is the input
                   sectionNumberValue = await sectionNumberWrapper.first().inputValue();
-                  console.log(`📋 [associatedClass] Found section number value (direct input): "${sectionNumberValue}"`);
+                  logger.log(`📋 [associatedClass] Found section number value (direct input): "${sectionNumberValue}"`);
                 } else {
                   // Look for input inside the wrapper
                   const sectionInput = sectionNumberWrapper.locator('input, textarea, select').first();
                   if (await sectionInput.count() > 0) {
                     sectionNumberValue = await sectionInput.inputValue();
-                    console.log(`📋 [associatedClass] Found section number value (nested input): "${sectionNumberValue}"`);
+                    logger.log(`📋 [associatedClass] Found section number value (nested input): "${sectionNumberValue}"`);
                   } else {
-                    console.log(`⚠️ [associatedClass] No input found in sectionNumber field (tag: ${tagName}).`);
+                    logger.log(`⚠️ [associatedClass] No input found in sectionNumber field (tag: ${tagName}).`);
                   }
                 }
               } catch (err) {
-                console.log(`⚠️ [associatedClass] Error reading sectionNumber: ${err.message}`);
+                logger.log(`⚠️ [associatedClass] Error reading sectionNumber: ${err.message}`);
               }
             } else {
-              console.log(`⚠️ [associatedClass] sectionNumber field not found.`);
+              logger.log(`⚠️ [associatedClass] sectionNumber field not found.`);
             }
 
             // If we found a section number value, input it directly as text
             if (sectionNumberValue && sectionNumberValue.trim() !== '') {
-              console.log(`✏️ [associatedClass] Entering section number as text: "${sectionNumberValue}"`);
+              logger.log(`✏️ [associatedClass] Entering section number as text: "${sectionNumberValue}"`);
 
               try {
                 // Find the input field within the multiselect and enter the text directly
@@ -810,29 +811,29 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                   await page.waitForTimeout(500); // Wait for input to register
                   // Press Enter or Tab to confirm the input
                   await inputField.press('Enter');
-                  console.log(`✅ [associatedClass] Successfully entered section number: "${sectionNumberValue}"`);
+                  logger.log(`✅ [associatedClass] Successfully entered section number: "${sectionNumberValue}"`);
                   // Mark as selected so we skip normal selection logic
                 } else {
-                  console.log(`⚠️ [associatedClass] Could not find input field in associatedClass dropdown.`);
+                  logger.log(`⚠️ [associatedClass] Could not find input field in associatedClass dropdown.`);
                   // Fall through to normal selection logic
                 }
               } catch (err) {
-                console.log(`❌ [associatedClass] Error entering text: ${err.message}`);
+                logger.log(`❌ [associatedClass] Error entering text: ${err.message}`);
                 // Fall through to normal selection logic
               }
             } else {
-              console.log(`⚠️ [associatedClass] No section number value found, using normal selection.`);
+              logger.log(`⚠️ [associatedClass] No section number value found, using normal selection.`);
             }
           }
         } catch (err) {
-          console.log(`❌ Couldn't click multiselect for ${qid}, skipping. Reason: ${err.message}`);
+          logger.log(`❌ Couldn't click multiselect for ${qid}, skipping. Reason: ${err.message}`);
           continue;
         }
         // Wait for dropdown to appear and check for options
         const options = wrapper.locator('.multiselect__content-wrapper li, [role="option"]');
         const optionCount = await options.count();
         if (optionCount === 0) {
-          console.log(`🚫 Multiselect for ${qid} has no options (list is empty), skipping.`);
+          logger.log(`🚫 Multiselect for ${qid} has no options (list is empty), skipping.`);
           continue;
         }
         let selected = false;
@@ -844,7 +845,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
           if (await selectedOptions.count() > 0) {
             const selectedText = await selectedOptions.first().textContent();
             if (selectedText && selectedText.trim() !== '') {
-              console.log(`✅ [associatedClass] Already selected option: "${selectedText.trim()}", skipping normal selection.`);
+              logger.log(`✅ [associatedClass] Already selected option: "${selectedText.trim()}", skipping normal selection.`);
               selected = true;
             }
           }
@@ -892,30 +893,30 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                 await option.click();
               }
               await page.waitForTimeout(500);
-              let nowHasValue = await hasSelectedValue(wrapper);
+              let nowHasValue = await hasSelectedValue(wrapper, logger);
               // Retry check once more after additional wait (UI can be slow)
               if (!nowHasValue) {
                 await page.waitForTimeout(400);
-                nowHasValue = await hasSelectedValue(wrapper);
+                nowHasValue = await hasSelectedValue(wrapper, logger);
               }
               if (nowHasValue) {
-                console.log(`✅ Selected option #${i + 1} for multiselect ${qid}`);
+                logger.log(`✅ Selected option #${i + 1} for multiselect ${qid}`);
                 selected = true;
                 // If this is a trigger field (partOfTerm, campus), wait for form to settle
                 if (['partOfTerm', 'campus', 'college'].includes(qid)) {
-                  console.log(`   ┗ ⏳ Waiting for form to settle after ${qid} selection...`);
+                  logger.log(`   ┗ ⏳ Waiting for form to settle after ${qid} selection...`);
                   await page.waitForTimeout(1500);
                 }
                 break;
               } else {
-                console.log(`⚠️  Clicked option #${i + 1} for multiselect ${qid}, but no value was selected. Trying next...`);
+                logger.log(`⚠️  Clicked option #${i + 1} for multiselect ${qid}, but no value was selected. Trying next...`);
                 try {
                   await wrapper.click();
                   await page.waitForTimeout(300);
                 } catch (_) { }
               }
             } catch (err) {
-              console.log(`❌ Couldn't select option #${i + 1} for multiselect ${qid}, trying next. Reason: ${err.message}`);
+              logger.log(`❌ Couldn't select option #${i + 1} for multiselect ${qid}, trying next. Reason: ${err.message}`);
               continue;
             }
           }
@@ -935,7 +936,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               } catch { }
             }
             if (attempt < maxAttempts) {
-              console.log(`🚫 Multiselect for ${qid} has options, but none are visible/selectable. Option texts: [${optionTexts.join(', ')}] Trying one more time (attempt ${attempt + 1} of ${maxAttempts})...`);
+              logger.log(`🚫 Multiselect for ${qid} has options, but none are visible/selectable. Option texts: [${optionTexts.join(', ')}] Trying one more time (attempt ${attempt + 1} of ${maxAttempts})...`);
               // Try to click the options again in case the UI changed
               await page.waitForTimeout(500);
               for (let i = 0; i < optionCount; i++) {
@@ -970,31 +971,31 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                       await option.click();
                     }
                     await page.waitForTimeout(500);
-                    let nowHasValue = await hasSelectedValue(wrapper);
+                    let nowHasValue = await hasSelectedValue(wrapper, logger);
                     // Retry check once more
                     if (!nowHasValue) {
                       await page.waitForTimeout(400);
-                      nowHasValue = await hasSelectedValue(wrapper);
+                      nowHasValue = await hasSelectedValue(wrapper, logger);
                     }
                     if (nowHasValue) {
-                      console.log(`✅ Selected option #${i + 1} for multiselect ${qid} (on retry attempt ${attempt + 1})`);
+                      logger.log(`✅ Selected option #${i + 1} for multiselect ${qid} (on retry attempt ${attempt + 1})`);
                       selected = true;
                       found = true;
                       // If this is a trigger field (partOfTerm, campus), wait for form to settle
                       if (['partOfTerm', 'campus', 'college'].includes(qid)) {
-                        console.log(`   ┗ ⏳ Waiting for form to settle after ${qid} selection...`);
+                        logger.log(`   ┗ ⏳ Waiting for form to settle after ${qid} selection...`);
                         await page.waitForTimeout(1500);
                       }
                       break;
                     } else {
-                      console.log(`⚠️  Clicked option #${i + 1} for multiselect ${qid} (retry), but no value was selected. Trying next...`);
+                      logger.log(`⚠️  Clicked option #${i + 1} for multiselect ${qid} (retry), but no value was selected. Trying next...`);
                       try {
                         await wrapper.click();
                         await page.waitForTimeout(300);
                       } catch (_) { }
                     }
                   } catch (err) {
-                    console.log(`❌ Couldn't select option #${i + 1} for multiselect ${qid} (on retry), trying next. Reason: ${err.message}`);
+                    logger.log(`❌ Couldn't select option #${i + 1} for multiselect ${qid} (on retry), trying next. Reason: ${err.message}`);
                     continue;
                   }
                 }
@@ -1002,7 +1003,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               if (selected) break;
             } else {
               // Last attempt - try typing fallback for async multiselects before giving up
-              console.log(`🔎 [${qid}] No selectable options found, trying typing fallback...`);
+              logger.log(`🔎 [${qid}] No selectable options found, trying typing fallback...`);
               const multiInput = wrapper.locator('input.multiselect__input, input[type="text"]').first();
               if (await multiInput.count() > 0) {
                 const placeholderText = ((await multiInput.getAttribute('placeholder')) || '').toLowerCase();
@@ -1015,7 +1016,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                       try { await wrapper.click(); } catch (_) { }
                       await page.waitForTimeout(300);
                       await multiInput.fill(ch);
-                      console.log(`   ┣ Typed '${ch}' for ${qid}...`);
+                      logger.log(`   ┣ Typed '${ch}' for ${qid}...`);
                     } catch (_) { continue; }
                     await page.waitForTimeout(1500);
 
@@ -1046,13 +1047,13 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
 
                     if (picked) {
                       await page.waitForTimeout(800);
-                      let nowHasValue = await hasSelectedValue(wrapper);
+                      let nowHasValue = await hasSelectedValue(wrapper, logger);
                       if (!nowHasValue) {
                         await page.waitForTimeout(500);
-                        nowHasValue = await hasSelectedValue(wrapper);
+                        nowHasValue = await hasSelectedValue(wrapper, logger);
                       }
                       if (nowHasValue) {
-                        console.log(`   ┗ ✅ Selected option for ${qid} via typing fallback (typed '${ch}')`);
+                        logger.log(`   ┗ ✅ Selected option for ${qid} via typing fallback (typed '${ch}')`);
                         selected = true;
                         break;
                       }
@@ -1064,7 +1065,7 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                 }
               }
               if (!selected) {
-                console.log(`🚫 Multiselect for ${qid} has options, but none are visible/selectable. Option texts: [${optionTexts.join(', ')}] Skipping.`);
+                logger.log(`🚫 Multiselect for ${qid} has options, but none are visible/selectable. Option texts: [${optionTexts.join(', ')}] Skipping.`);
               }
             }
             attempt++;
@@ -1076,12 +1077,12 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
         let tagName = await wrapper.first().evaluate(el => el.tagName.toLowerCase());
         if (["input", "textarea", "select"].includes(tagName)) {
           input = wrapper.first();
-          console.log(`🟢 [${qid}] Wrapper is itself a <${tagName}> element.`);
+          logger.log(`🟢 [${qid}] Wrapper is itself a <${tagName}> element.`);
         } else {
           input = wrapper.locator('input, textarea, select');
         }
         const inputCount = await input.count();
-        console.log(`🔎 [${qid}] Inputs found: ${inputCount}`);
+        logger.log(`🔎 [${qid}] Inputs found: ${inputCount}`);
         if (inputCount > 0) {
           const inputElement = input.first();
           // Debug: Check element state
@@ -1089,13 +1090,13 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
           const isEnabled = await inputElement.isEnabled();
           const inputType = await inputElement.getAttribute('type');
           tagName = await inputElement.evaluate(el => el.tagName.toLowerCase());
-          console.log(`   ┣ Tag: <${tagName}> | Type: ${inputType} | Visible: ${isVisible} | Enabled: ${isEnabled}`);
+          logger.log(`   ┣ Tag: <${tagName}> | Type: ${inputType} | Visible: ${isVisible} | Enabled: ${isEnabled}`);
           if (!isVisible) {
-            console.log(`   ┗ 👁️  [${qid}] Element not visible, skipping.`);
+            logger.log(`   ┗ 👁️  [${qid}] Element not visible, skipping.`);
             continue;
           }
           if (!isEnabled) {
-            console.log(`   ┗ 🔒 [${qid}] Element not enabled, skipping.`);
+            logger.log(`   ┗ 🔒 [${qid}] Element not enabled, skipping.`);
             continue;
           }
           try {
@@ -1118,11 +1119,11 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
                 dateStr = `${year}-${month}-${day}`;
               } else {
                 // Use short month format (Jul 28, 2025) as default
-                const options = { year: 'numeric', month: 'short', day: 'numeric' };
+                const options = { year: 'numeric', month: 'short', day: 'numeric' } as unknown as any;
                 dateStr = today.toLocaleDateString('en-US', options);
               }
 
-              console.log(`   ┣ 📅 Processing date input for [${qid}]`);
+              logger.log(`   ┣ 📅 Processing date input for [${qid}]`);
 
               // Clear the field first
               await inputElement.clear();
@@ -1132,44 +1133,44 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               await inputElement.fill(dateStr);
               await page.waitForTimeout(500); // Wait for calendar to open
               await inputElement.press('Enter'); // Close the calendar
-              console.log(`   ┗ ✅ Filled date input for [${qid}] with ${dateStr}`);
+              logger.log(`   ┗ ✅ Filled date input for [${qid}] with ${dateStr}`);
             } else if (tagName === 'select') {
               // Handle select dropdown
-              console.log(`   ┣ 📋 Processing select for [${qid}]`);
+              logger.log(`   ┣ 📋 Processing select for [${qid}]`);
               await inputElement.selectOption({ index: 0 }); // Select first option
-              console.log(`   ┗ ✅ Selected first option for select [${qid}]`);
+              logger.log(`   ┗ ✅ Selected first option for select [${qid}]`);
             } else if (inputType === 'checkbox') {
               // Handle checkbox
-              console.log(`   ┣ ☑️  Processing checkbox for [${qid}]`);
+              logger.log(`   ┣ ☑️  Processing checkbox for [${qid}]`);
               await inputElement.check();
-              console.log(`   ┗ ✅ Checked checkbox for [${qid}]`);
+              logger.log(`   ┗ ✅ Checked checkbox for [${qid}]`);
             } else if (inputType === 'radio') {
               // Handle radio button
-              console.log(`   ┣ 🔘 Processing radio for [${qid}]`);
+              logger.log(`   ┣ 🔘 Processing radio for [${qid}]`);
               await inputElement.check();
-              console.log(`   ┗ ✅ Selected radio for [${qid}]`);
+              logger.log(`   ┗ ✅ Selected radio for [${qid}]`);
             } else if (inputType === 'number' || qid === 'duration') {
               // Handle number input or duration (always fill with a number)
-              console.log(`   ┣ 🔢 Processing number input for [${qid}]`);
+              logger.log(`   ┣ 🔢 Processing number input for [${qid}]`);
               await inputElement.fill('15');
-              console.log(`   ┗ ✅ Filled number input for [${qid}]`);
+              logger.log(`   ┗ ✅ Filled number input for [${qid}]`);
             } else {
               // Handle text input/textarea (append instead of replace)
-              console.log(`   ┣ ✏️  Processing text input for [${qid}]`);
+              logger.log(`   ┣ ✏️  Processing text input for [${qid}]`);
               let currentValue = await inputElement.inputValue();
               let newValue = currentValue + '-CDtest';
               // If this is sectionName, enforce max 30 characters
               if (qid === 'sectionName') {
                 if (newValue.length > 30) {
                   newValue = newValue.slice(0, 30);
-                  console.log(`   ┃ [sectionName] Value trimmed to 30 characters.`);
+                  logger.log(`   ┃ [sectionName] Value trimmed to 30 characters.`);
                 }
               }
               await inputElement.fill(newValue);
-              console.log(`   ┗ ✅ Appended to text input for [${qid}]`);
+              logger.log(`   ┗ ✅ Appended to text input for [${qid}]`);
             }
           } catch (error) {
-            console.log(`   ┗ ❌ Couldn't edit field [${qid}], skipping it. Reason: ${error.message}`);
+            logger.log(`   ┗ ❌ Couldn't edit field [${qid}], skipping it. Reason: ${error.message}`);
             continue;
           }
         } else {
@@ -1195,46 +1196,46 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
               const isEnabled = await unselectedBtn.isEnabled();
 
               if (!isVisible) {
-                console.log(`   ┗ 👁️  [${qid}] Unselected Yes/No button not visible, skipping.`);
+                logger.log(`   ┗ 👁️  [${qid}] Unselected Yes/No button not visible, skipping.`);
               } else if (!isEnabled) {
-                console.log(`   ┗ 🔒 [${qid}] Unselected Yes/No button not enabled, skipping.`);
+                logger.log(`   ┗ 🔒 [${qid}] Unselected Yes/No button not enabled, skipping.`);
               } else {
                 try {
                   await unselectedBtn.click();
-                  console.log(`   ┗ ✅ Clicked unselected Yes/No button for [${qid}]`);
+                  logger.log(`   ┗ ✅ Clicked unselected Yes/No button for [${qid}]`);
                 } catch (err) {
-                  console.log(`   ┗ ❌ Couldn't click unselected Yes/No button for [${qid}]. Reason: ${err.message}`);
+                  logger.log(`   ┗ ❌ Couldn't click unselected Yes/No button for [${qid}]. Reason: ${err.message}`);
                 }
               }
             } else {
-              console.log(`   ┗ ⚠️  Both Yes/No buttons for [${qid}] appear selected or unselected, skipping.`);
+              logger.log(`   ┗ ⚠️  Both Yes/No buttons for [${qid}] appear selected or unselected, skipping.`);
             }
           } else {
-            console.log(`⚠️  [${qid}] No input or Yes/No button group found, skipping.`);
+            logger.log(`⚠️  [${qid}] No input or Yes/No button group found, skipping.`);
           }
         }
       }
     } catch (outerError) {
-      console.log(`❌ Couldn't edit field ${qid}, skipping it. Reason: ${outerError.message}`);
+      logger.log(`❌ Couldn't edit field ${qid}, skipping it. Reason: ${outerError.message}`);
       continue;
     }
   }
 
   // Save the section if this is an action that doesn't have professors/meetings and we have the required parameters
   if ((action === 'createNoMeetNoProf' || action === 'inactivateSection') && outputDir && browser) {
-    console.log('📸 [Template Fill] Taking "after" screenshot before save...');
-    await captureModalAfter(page, outputDir, action);
+    logger.log('📸 [Template Fill] Taking "after" screenshot before save...');
+    await captureModalAfter(page, outputDir, action, logger);
 
     // Generate diff before saving
     try {
       const afterValuesForFill = await readSectionValues(page, schoolId);
-      await writeSectionDiff(__diffState.before, afterValuesForFill, schoolId, outputDir, action, __diffState.context?.dateStr);
+      await writeSectionDiff(__diffState.before, afterValuesForFill, schoolId, outputDir, action, __diffState.context?.dateStr, logger);
     } catch (err) {
-      console.log(`⚠️ [Template Fill] Could not generate diff: ${err.message}`);
+      logger.log(`⚠️ [Template Fill] Could not generate diff: ${err.message}`);
     }
 
-    console.log(`💾 [Template Fill] Saving section after template fill (${action})...`);
-    const saveSuccess = await saveSection(page, outputDir, action, browser, schoolId);
+    logger.log(`💾 [Template Fill] Saving section after template fill (${action})...`);
+    const saveSuccess = await saveSection(page, outputDir, action, browser, schoolId, logger);
     return saveSuccess;
   }
 
@@ -1242,9 +1243,9 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
 }
 
 // Pre-fill any visible required fields that are currently empty (sections)
-async function preFillRequiredEmptySectionFields(page) {
+async function preFillRequiredEmptySectionFields(page, logger: ILogger) {
   try {
-    console.log('🔎 [Sections] Checking for empty required fields before save...');
+    logger.log('🔎 [Sections] Checking for empty required fields before save...');
 
     // Protect critical or sensitive fields from auto-fill for sections
     const protectedQids = new Set([
@@ -1324,7 +1325,7 @@ async function preFillRequiredEmptySectionFields(page) {
       // Multiselect/select-like
       if (cls.includes('multiselect') || role === 'combobox' || role === 'listbox') {
         try {
-          const selected = await selectDropdownIfEmpty(el, 'Required field');
+          const selected = await selectDropdownIfEmpty(el, 'Required field', null, logger);
           return !!selected;
         } catch (_) { }
       }
@@ -1490,7 +1491,7 @@ async function preFillRequiredEmptySectionFields(page) {
 
       const qid = await inferQid(fieldWrapper, control);
       if (qid && protectedQids.has(qid)) {
-        console.log(`   ┗ ⏭️ [Sections] Prefill skip for protected field: ${qid}`);
+        logger.log(`   ┗ ⏭️ [Sections] Prefill skip for protected field: ${qid}`);
         continue;
       }
 
@@ -1505,27 +1506,27 @@ async function preFillRequiredEmptySectionFields(page) {
       } catch (_) { }
     }
 
-    console.log(`✅ [Sections] Pre-filled ${filled} required field(s) before save`);
+    logger.log(`✅ [Sections] Pre-filled ${filled} required field(s) before save`);
   } catch (error) {
-    console.log(`⚠️ [Sections] Error during preFillRequiredEmptySectionFields: ${error.message}`);
+    logger.log(`⚠️ [Sections] Error during preFillRequiredEmptySectionFields: ${error.message}`);
   }
 }
 
-async function saveSection(page, outputDir, action, browser = null, schoolId = '') {
-  try { ensureRunLogger(outputDir); } catch (_) { }
+async function saveSection(page, outputDir, action, browser = null, schoolId = '', logger: ILogger) {
+  try { ensureRunLogger(outputDir, logger); } catch (_) { }
   await page.waitForTimeout(1500);
   const saveBtn = page.locator('button[data-test="save-section-btn"]');
 
   if (await saveBtn.count() > 0) {
     // Attempt to pre-fill any empty required fields before checking disabled state
-    try { await preFillRequiredEmptySectionFields(page); } catch (_) { }
+    try { await preFillRequiredEmptySectionFields(page, logger); } catch (_) { }
     // Check if save button is disabled
     const isDisabled = await saveBtn.first().getAttribute('disabled') !== null;
     if (isDisabled) {
-      console.log('❌ Save Section button is disabled. Section cannot be saved.');
-      console.log('📸 Taking screenshot for error details...');
-      await captureModalError(page, outputDir);
-      console.log('💡 Please check the screenshot for validation errors or missing required fields.');
+      logger.log('❌ Save Section button is disabled. Section cannot be saved.');
+      logger.log('📸 Taking screenshot for error details...');
+      await captureModalError(page, outputDir, undefined, logger);
+      logger.log('💡 Please check the screenshot for validation errors or missing required fields.');
 
       // Check if the disabled state is due to instructor double booking
       const pageContent = await page.content();
@@ -1533,13 +1534,13 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
         pageContent.includes('already assigned to another section');
 
       if (doubleBookingError) {
-        console.log('🔍 [Double Bookings] Detected instructor double booking preventing save!');
-        console.log('🔄 [Double Bookings] Attempting to resolve by setting Ignore Double Bookings to Yes...');
+        logger.log('🔍 [Double Bookings] Detected instructor double booking preventing save!');
+        logger.log('🔄 [Double Bookings] Attempting to resolve by setting Ignore Double Bookings to Yes...');
 
-        const ignoreSuccess = await ignoreDoubleBookings(page);
+        const ignoreSuccess = await ignoreDoubleBookings(page, logger);
         if (ignoreSuccess) {
-          console.log('✅ [Double Bookings] Successfully set Ignore Double Bookings for all professors.');
-          console.log('🔄 [Double Bookings] Checking if save button is now enabled...');
+          logger.log('✅ [Double Bookings] Successfully set Ignore Double Bookings for all professors.');
+          logger.log('🔄 [Double Bookings] Checking if save button is now enabled...');
 
           // Wait a moment and check if save button is now enabled
           await page.waitForTimeout(2000);
@@ -1547,21 +1548,21 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
           const isStillDisabled = await saveButtonAfterFix.first().getAttribute('disabled') !== null;
 
           if (!isStillDisabled) {
-            console.log('🎉 [Double Bookings] Save button is now enabled! Calling saveSection to handle the save...');
+            logger.log('🎉 [Double Bookings] Save button is now enabled! Calling saveSection to handle the save...');
 
             // Call the existing saveSection function to handle save properly with conflict modals
-            const saveResult = await saveSection(page, outputDir, action, browser, schoolId);
+            const saveResult = await saveSection(page, outputDir, action, browser, schoolId, logger);
             if (saveResult) {
-              console.log('🎉 [Double Bookings] Section saved successfully after resolving double booking!');
+              logger.log('🎉 [Double Bookings] Section saved successfully after resolving double booking!');
               return true;
             } else {
-              console.log('⚠️ [Double Bookings] Section still has errors after resolving double booking.');
+              logger.log('⚠️ [Double Bookings] Section still has errors after resolving double booking.');
             }
           } else {
-            console.log('⚠️ [Double Bookings] Save button is still disabled after resolving double booking.');
+            logger.log('⚠️ [Double Bookings] Save button is still disabled after resolving double booking.');
           }
         } else {
-          console.log('❌ [Double Bookings] Failed to set Ignore Double Bookings.');
+          logger.log('❌ [Double Bookings] Failed to set Ignore Double Bookings.');
         }
       }
 
@@ -1576,16 +1577,16 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
 
           if (takeoverResult.success) {
             if (takeoverResult.sectionChanged) {
-              console.log(`🔄 User switched to different section: "${takeoverResult.newSectionId}"`);
-              console.log('🔄 Restarting section template process with new section...');
+              logger.log(`🔄 User switched to different section: "${takeoverResult.newSectionId}"`);
+              logger.log('🔄 Restarting section template process with new section...');
 
               // Restart the entire section template fill process with the new section
-              return await restartSectionTemplateProcess(page, outputDir, action, schoolId, browser);
+              return await restartSectionTemplateProcess(page, outputDir, action, schoolId, browser, logger);
             } else if (takeoverResult.sectionSaved) {
-              console.log('✅ User intervention successful - section saved manually (modal closed)');
+              logger.log('✅ User intervention successful - section saved manually (modal closed)');
               return true;
             } else {
-              console.log('✅ User intervention successful - section saved manually');
+              logger.log('✅ User intervention successful - section saved manually');
               return true;
             }
           }
@@ -1602,15 +1603,15 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
       // Robustly handle conflict modal
       const saveAnywayBtn = page.locator('button[data-test="save_anyway"]');
       if (await saveAnywayBtn.count() > 0 && await saveAnywayBtn.first().isVisible()) {
-        console.log('⚠️ Conflict modal detected! Taking screenshot of entire page...');
+        logger.log('⚠️ Conflict modal detected! Taking screenshot of entire page...');
 
         // Take screenshot of the entire page when conflict modal is detected
         const conflictScreenshotPath = path.join(outputDir, `${action}-section-conflictModal.png`);
         await page.screenshot({ path: conflictScreenshotPath, fullPage: true });
-        console.log(`📸 Conflict modal screenshot saved to: ${conflictScreenshotPath}`);
+        logger.log(`📸 Conflict modal screenshot saved to: ${conflictScreenshotPath}`);
 
         await saveAnywayBtn.first().click();
-        console.log('   ┗ Clicked "Save Anyway" button in conflict modal.');
+        logger.log('   ┗ Clicked "Save Anyway" button in conflict modal.');
         await page.waitForTimeout(1000); // Wait for modal to process
       }
 
@@ -1622,17 +1623,17 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
           }
           const afterVals = await readSectionValues(page, schoolId);
           const ts = (__diffState.context?.dateStr) || getTimestamp();
-          await writeSectionDiff(__diffState.before, afterVals, schoolId, outputDir, action, ts);
+          await writeSectionDiff(__diffState.before, afterVals, schoolId, outputDir, action, ts, logger);
         }
       } catch (diffErr) {
-        console.log(`⚠️ [Save] Diff attempt before error check failed: ${diffErr.message}`);
+        logger.log(`⚠️ [Save] Diff attempt before error check failed: ${diffErr.message}`);
       }
 
       // take screenshot if save section returns UI errors
       const errorIcon = await page.$('.material-icons.pr-2');
       if (errorIcon) {
-        console.log('❌ Error detected after saving section!');
-        await captureModalError(page, outputDir);
+        logger.log('❌ Error detected after saving section!');
+        await captureModalError(page, outputDir, undefined, logger);
 
         // Check if the error is related to instructor double booking
         const pageContent = await page.content();
@@ -1641,25 +1642,25 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
           pageContent.includes('instructor.*already.*assigned');
 
         if (doubleBookingError) {
-          console.log('🔍 [Double Bookings] Detected instructor double booking error!');
-          console.log('🔄 [Double Bookings] Attempting to resolve by setting Ignore Double Bookings to Yes...');
+          logger.log('🔍 [Double Bookings] Detected instructor double booking error!');
+          logger.log('🔄 [Double Bookings] Attempting to resolve by setting Ignore Double Bookings to Yes...');
 
-          const ignoreSuccess = await ignoreDoubleBookings(page);
+          const ignoreSuccess = await ignoreDoubleBookings(page, logger);
           if (ignoreSuccess) {
-            console.log('✅ [Double Bookings] Successfully set Ignore Double Bookings for all professors.');
-            console.log('🔄 [Double Bookings] Attempting to save section again...');
+            logger.log('✅ [Double Bookings] Successfully set Ignore Double Bookings for all professors.');
+            logger.log('🔄 [Double Bookings] Attempting to save section again...');
 
             // Call the existing saveSection function to handle save properly with conflict modals
-            console.log('🔄 [Double Bookings] Calling saveSection to handle the retry save...');
-            const retryResult = await saveSection(page, outputDir, action, browser, schoolId);
+            logger.log('🔄 [Double Bookings] Calling saveSection to handle the retry save...');
+            const retryResult = await saveSection(page, outputDir, action, browser, schoolId, logger);
             if (retryResult) {
-              console.log('🎉 [Double Bookings] Section saved successfully after resolving double booking!');
+              logger.log('🎉 [Double Bookings] Section saved successfully after resolving double booking!');
               return true;
             } else {
-              console.log('⚠️ [Double Bookings] Section still has errors after resolving double booking.');
+              logger.log('⚠️ [Double Bookings] Section still has errors after resolving double booking.');
             }
           } else {
-            console.log('❌ [Double Bookings] Failed to set Ignore Double Bookings.');
+            logger.log('❌ [Double Bookings] Failed to set Ignore Double Bookings.');
           }
         }
 
@@ -1674,16 +1675,16 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
 
             if (takeoverResult.success) {
               if (takeoverResult.sectionChanged) {
-                console.log(`🔄 User switched to different section: "${takeoverResult.newSectionId}"`);
-                console.log('🔄 Restarting section template process with new section...');
+                logger.log(`🔄 User switched to different section: "${takeoverResult.newSectionId}"`);
+                logger.log('🔄 Restarting section template process with new section...');
 
                 // Restart the entire section template fill process with the new section
-                return await restartSectionTemplateProcess(page, outputDir, action, schoolId, browser);
+                return await restartSectionTemplateProcess(page, outputDir, action, schoolId, browser, logger);
               } else if (takeoverResult.sectionSaved) {
-                console.log('✅ User intervention successful - section saved manually (modal closed)');
+                logger.log('✅ User intervention successful - section saved manually (modal closed)');
                 return true;
               } else {
-                console.log('✅ User intervention successful - section saved manually');
+                logger.log('✅ User intervention successful - section saved manually');
                 return true;
               }
             }
@@ -1692,31 +1693,31 @@ async function saveSection(page, outputDir, action, browser = null, schoolId = '
 
         return false;
       } else {
-        console.log('✅ No error detected after saving section.');
+        logger.log('✅ No error detected after saving section.');
       }
 
       // Check for API error notification
-      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action, logger);
       if (apiError) {
-        console.log('❌ API error detected, section save failed due to template issue');
+        logger.log('❌ API error detected, section save failed due to template issue');
         return false;
       }
 
-      console.log(`✅ Saved Section`);
+      logger.log(`✅ Saved Section`);
       return true;
     } else {
-      console.log(`❌ Could not find or click the Save Section button.`);
+      logger.log(`❌ Could not find or click the Save Section button.`);
       return false;
     }
   } else {
-    console.log(`❌ Could not find the Save Section button.`);
+    logger.log(`❌ Could not find the Save Section button.`);
     return false;
   }
 }
 
-async function validateAndResetMeetingPatterns(page, outputDir, action) {
-  try { ensureRunLogger(outputDir); } catch (_) { }
-  console.log('🔎 [Meeting Patterns] Locating Meeting Patterns & Rooms section...');
+async function validateAndResetMeetingPatterns(page, outputDir, action, logger: ILogger) {
+  try { ensureRunLogger(outputDir, logger); } catch (_) { }
+  logger.log('🔎 [Meeting Patterns] Locating Meeting Patterns & Rooms section...');
   const meetingPatternSection = page.locator('[data-card-id="times"]');
   let found = false;
   let deletedCount = 0;
@@ -1733,7 +1734,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
       patternLocator = meetingPatternSection.locator('[data-test="custom_time"]');
       count = await patternLocator.count();
       patternType = 'custom_time';
-      console.log(`🔍 [Meeting Patterns] Trying custom_time selector - found ${count} pattern(s)`);
+      logger.log(`🔍 [Meeting Patterns] Trying custom_time selector - found ${count} pattern(s)`);
     }
 
     // If still none, try timeblock patterns
@@ -1741,7 +1742,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
       patternLocator = meetingPatternSection.locator('[data-test="timeblock"]');
       count = await patternLocator.count();
       patternType = 'timeblock';
-      console.log(`🔍 [Meeting Patterns] Trying timeblock selector - found ${count} pattern(s)`);
+      logger.log(`🔍 [Meeting Patterns] Trying timeblock selector - found ${count} pattern(s)`);
     }
 
     // If still none, try table rows as fallback
@@ -1749,12 +1750,12 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
       patternLocator = meetingPatternSection.locator('.tr.row.bg-white').filter({ hasNot: page.locator('.thead') });
       count = await patternLocator.count();
       patternType = 'table-row';
-      console.log(`🔍 [Meeting Patterns] Trying table row selector - found ${count} row(s)`);
+      logger.log(`🔍 [Meeting Patterns] Trying table row selector - found ${count} row(s)`);
     }
 
     if (count > 0) {
       found = true;
-      console.log(`🗑️ [Meeting Patterns] Found ${count} Meeting Pattern(s) using ${patternType} selector, attempting deletion...`);
+      logger.log(`🗑️ [Meeting Patterns] Found ${count} Meeting Pattern(s) using ${patternType} selector, attempting deletion...`);
 
       try {
         // Always target the first pattern (they renumber after deletion)
@@ -1768,7 +1769,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
         if (await deleteBtn.count() > 0 && await deleteBtn.isVisible()) {
           await deleteBtn.click();
           deleteSuccess = true;
-          console.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (delete_block)`);
+          logger.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (delete_block)`);
         }
 
         // Strategy 2: Look for delete_meeting_pattern_X button (after deletion structure)
@@ -1777,7 +1778,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
           if (await deleteBtn.count() > 0 && await deleteBtn.isVisible()) {
             await deleteBtn.click();
             deleteSuccess = true;
-            console.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (delete_meeting_pattern)`);
+            logger.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (delete_meeting_pattern)`);
           }
         }
 
@@ -1787,7 +1788,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
           if (await deleteBtn.count() > 0 && await deleteBtn.isVisible()) {
             await deleteBtn.click();
             deleteSuccess = true;
-            console.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (aria-label)`);
+            logger.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (aria-label)`);
           }
         }
 
@@ -1800,10 +1801,10 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
             if (await deleteBtn.count() > 0 && await deleteBtn.isVisible()) {
               await deleteBtn.click();
               deleteSuccess = true;
-              console.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (hover + delete)`);
+              logger.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (hover + delete)`);
             }
           } catch (hoverError) {
-            console.log(`   ┃ Hover failed`);
+            logger.log(`   ┃ Hover failed`);
           }
         }
 
@@ -1813,7 +1814,7 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
           if (await deleteBtn.count() > 0 && await deleteBtn.isVisible()) {
             await deleteBtn.click();
             deleteSuccess = true;
-            console.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (remove icon)`);
+            logger.log(`   ┗ Deleted Meeting Pattern ${deletedCount + 1} (remove icon)`);
           }
         }
 
@@ -1827,18 +1828,18 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
           const timeblockCount = await meetingPatternSection.locator('[data-test="timeblock"]').count();
           const maxCount = Math.max(ariaCount, customCount, timeblockCount);
 
-          console.log(`   ┗ After deletion: ${maxCount} pattern(s) remaining (aria:${ariaCount}, custom:${customCount}, timeblock:${timeblockCount})`);
+          logger.log(`   ┗ After deletion: ${maxCount} pattern(s) remaining (aria:${ariaCount}, custom:${customCount}, timeblock:${timeblockCount})`);
 
           if (maxCount >= count) {
-            console.log(`   ⚠️ Pattern count didn't decrease - deletion may have failed`);
+            logger.log(`   ⚠️ Pattern count didn't decrease - deletion may have failed`);
             break; // Prevent infinite loop
           }
         } else {
-          console.log(`   ┗ ⚠️ No delete button found for Meeting Pattern, stopping deletion`);
+          logger.log(`   ┗ ⚠️ No delete button found for Meeting Pattern, stopping deletion`);
           break;
         }
       } catch (error) {
-        console.log(`   ┗ ⚠️ Error deleting Meeting Pattern: ${error.message}`);
+        logger.log(`   ┗ ⚠️ Error deleting Meeting Pattern: ${error.message}`);
         break;
       }
     } else {
@@ -1848,13 +1849,13 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
   }
 
   if (!found) {
-    console.log('ℹ️ [Meeting Patterns] No existing meeting patterns found.');
+    logger.log('ℹ️ [Meeting Patterns] No existing meeting patterns found.');
   } else {
-    console.log(`✅ [Meeting Patterns] Deleted ${deletedCount} meeting pattern(s)`);
+    logger.log(`✅ [Meeting Patterns] Deleted ${deletedCount} meeting pattern(s)`);
   }
 
   // 2. If no patterns found, or after all are deleted, add a new one
-  console.log('🔍 [Meeting Patterns] Looking for add button...');
+  logger.log('🔍 [Meeting Patterns] Looking for add button...');
 
   let addTimeBtn;
   let buttonFound = false;
@@ -1881,36 +1882,36 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
     if (count > 0 && await addTimeBtn.first().isVisible()) {
       buttonFound = true;
       buttonName = `${btnConfig.name} (${btnConfig.scope})`;
-      console.log(`✅ [Meeting Patterns] Found ${buttonName} button`);
+      logger.log(`✅ [Meeting Patterns] Found ${buttonName} button`);
       break;
     }
   }
 
   if (buttonFound && addTimeBtn) {
-    console.log(`➕ [Meeting Patterns] Adding a new meeting pattern using ${buttonName}...`);
+    logger.log(`➕ [Meeting Patterns] Adding a new meeting pattern using ${buttonName}...`);
     await addTimeBtn.first().click();
     await page.waitForTimeout(500);
-    console.log('   ┗ Adding new meeting pattern.');
+    logger.log('   ┗ Adding new meeting pattern.');
 
     // Check for "Select Meeting Pattern" modal
     const selectPatternModal = page.locator('h5.font-weight-semi-bold', { hasText: 'Select Meeting Pattern' });
     if (await selectPatternModal.count() > 0 && await selectPatternModal.first().isVisible()) {
-      console.log('🟦 [Meeting Patterns] "Select Meeting Pattern" modal detected. Clicking USE CUSTOM TIMES...');
+      logger.log('🟦 [Meeting Patterns] "Select Meeting Pattern" modal detected. Clicking USE CUSTOM TIMES...');
       const useCustomTimesBtn = page.locator('button.btn.btn-secondary', { hasText: 'USE CUSTOM TIMES' });
       if (await useCustomTimesBtn.count() > 0 && await useCustomTimesBtn.first().isVisible()) {
         await useCustomTimesBtn.first().click();
         await page.waitForTimeout(500);
-        console.log('   ┗ Clicked USE CUSTOM TIMES.');
+        logger.log('   ┗ Clicked USE CUSTOM TIMES.');
       } else {
-        console.log('⚠️ [Meeting Patterns] Could not find USE CUSTOM TIMES button.');
+        logger.log('⚠️ [Meeting Patterns] Could not find USE CUSTOM TIMES button.');
       }
     }
   } else {
-    console.log('⚠️ [Meeting Patterns] Could not find any add button variant.');
-    console.log('🔍 [Meeting Patterns] Tried: AddMeetingPattern, add_time, AddTime (both section and global scope)');
+    logger.log('⚠️ [Meeting Patterns] Could not find any add button variant.');
+    logger.log('🔍 [Meeting Patterns] Tried: AddMeetingPattern, add_time, AddTime (both section and global scope)');
     // Log the HTML for troubleshooting
     const html = await meetingPatternSection.innerHTML();
-    console.log('Meeting Patterns section HTML:', html);
+    logger.log('Meeting Patterns section HTML:', html);
     return; // Exit early if no add button found
   }
 
@@ -1918,42 +1919,42 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
   await page.waitForTimeout(1000); // Wait for day buttons to load
   const mondayBtn = meetingPatternSection.locator('button[data-test="day_button_1"][aria-label="Toggle Monday"]');
   if (await mondayBtn.count() > 0) {
-    console.log('📅 [Meeting Patterns] Selecting Monday...');
+    logger.log('📅 [Meeting Patterns] Selecting Monday...');
     await mondayBtn.first().click();
     await page.waitForTimeout(300);
-    console.log('   ┗ Monday selected.');
+    logger.log('   ┗ Monday selected.');
   } else {
-    console.log('⚠️ [Meeting Patterns] Could not find Monday button.');
+    logger.log('⚠️ [Meeting Patterns] Could not find Monday button.');
     // Log available day buttons for debugging
     const dayButtons = meetingPatternSection.locator('button[data-test*="day_button"]');
     const dayButtonCount = await dayButtons.count();
-    console.log(`   ┗ Found ${dayButtonCount} day buttons total.`);
+    logger.log(`   ┗ Found ${dayButtonCount} day buttons total.`);
   }
 
   // 4. Click room select to open modal (fix: use div.room-select-modal)
   const roomSelectBtn = meetingPatternSection.locator('[data-test=\"room-select-modal\"]');
   if (await roomSelectBtn.count() > 0 && await roomSelectBtn.first().isVisible()) {
-    console.log('🏫 [Meeting Patterns] Opening room select modal...');
+    logger.log('🏫 [Meeting Patterns] Opening room select modal...');
     await roomSelectBtn.first().click();
     // Wait for assign-room-modal
     const assignRoomModal = page.locator('[data-test="assign-room-modal"]');
     await assignRoomModal.waitFor({ state: 'visible', timeout: 10000 });
-    console.log('   ┗ Room select modal opened.');
+    logger.log('   ┗ Room select modal opened.');
     // Click first item in the list
     await page.waitForTimeout(9000); // Wait for rooms list to load
     await assignRoomModal.first().press('Enter');
-    console.log('🏷️ [Meeting Patterns] Selecting first room in the list...');
+    logger.log('🏷️ [Meeting Patterns] Selecting first room in the list...');
   }
 
   // 5. Click set details
   const setDetailsBtn = meetingPatternSection.locator('button[data-test="set_details"]');
   if (await setDetailsBtn.isVisible()) {
-    console.log('⚙️ [Meeting Patterns] Opening "Set Details" modal...');
+    logger.log('⚙️ [Meeting Patterns] Opening "Set Details" modal...');
     await setDetailsBtn.click();
     // Wait for "Meeting Patterns Additional Information" modal
     const detailsModal = page.locator('.app-heading', { hasText: 'Meeting Patterns Additional Information' });
     await detailsModal.waitFor({ state: 'visible', timeout: 10000 });
-    console.log('   ┗ "Meeting Patterns Additional Information" modal opened.');
+    logger.log('   ┗ "Meeting Patterns Additional Information" modal opened.');
     await page.waitForTimeout(1000);
 
     // Note: "before" screenshot moved to meetAndProfDetails()
@@ -1964,18 +1965,18 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
     // Check for ANY multiselect dropdown in the meeting pattern details modal
     const allDropdowns = page.locator('[data-test="meeting-patterns-details-modal"] .multiselect');
     if (await allDropdowns.count() > 0) {
-      console.log(`🎓 [Meeting Patterns] Found ${await allDropdowns.count()} dropdown(s) in modal, validating and updating only empty dropdowns...`);
+      logger.log(`🎓 [Meeting Patterns] Found ${await allDropdowns.count()} dropdown(s) in modal, validating and updating only empty dropdowns...`);
 
       // Try each dropdown but only update if empty
       for (let i = 0; i < await allDropdowns.count(); i++) {
         const dropdown = allDropdowns.nth(i);
         if (await dropdown.isVisible()) {
-          console.log(`   ┣ Validating dropdown #${i + 1}...`);
-          await selectDropdownIfEmpty(dropdown, `Meeting Pattern Dropdown #${i + 1}`, page);
+          logger.log(`   ┣ Validating dropdown #${i + 1}...`);
+          await selectDropdownIfEmpty(dropdown, `Meeting Pattern Dropdown #${i + 1}`, page, logger);
         }
       }
     } else {
-      console.log('ℹ️ [Meeting Patterns] No dropdowns found in the modal.');
+      logger.log('ℹ️ [Meeting Patterns] No dropdowns found in the modal.');
     }
 
     // Close the modal
@@ -1986,9 +1987,9 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
     const screenshotAfter = path.join(outputDir, `${action}-section-MeetingPattern-Details-After.png`);
     await modalContent.screenshot({ path: screenshotAfter });
 
-    console.log(`\n✅ Screenshot saved to ${screenshotAfter}`);
+    logger.log(`\n✅ Screenshot saved to ${screenshotAfter}`);
     if (await closeBtn.count() > 0) {
-      console.log('❌ [Meeting Patterns] Closing "Set Details" modal...');
+      logger.log('❌ [Meeting Patterns] Closing "Set Details" modal...');
       try {
         // Check if close button is visible and enabled
         const isVisible = await closeBtn.first().isVisible();
@@ -1997,71 +1998,71 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
         if (isVisible && isEnabled) {
           await closeBtn.first().click();
           await page.waitForTimeout(500);
-          console.log('   ┗ "Set Details" modal closed via close button.');
+          logger.log('   ┗ "Set Details" modal closed via close button.');
         } else {
-          console.log('⚠️ [Meeting Patterns] Close button not visible or enabled. Trying fallback methods...');
+          logger.log('⚠️ [Meeting Patterns] Close button not visible or enabled. Trying fallback methods...');
 
           const fallbackClose = meetingDialog.locator('button[aria-label="Close modal"]');
           if (await fallbackClose.count() > 0) {
             await fallbackClose.first().click();
             await page.waitForTimeout(500);
-            console.log('   ┗ "Set Details" modal closed via close icon.');
+            logger.log('   ┗ "Set Details" modal closed via close icon.');
           } else {
-            console.log(`   ┗ Close icon not available; trying escape key.`);
+            logger.log(`   ┗ Close icon not available; trying escape key.`);
             try {
               await page.keyboard.press('Escape');
               await page.waitForTimeout(500);
-              console.log('   ┗ "Set Details" modal closed via escape key.');
+              logger.log('   ┗ "Set Details" modal closed via escape key.');
             } catch (err2) {
-              console.log(`   ┗ Error using escape key: ${err2.message}`);
-              console.log('   ┗ Could not close modal using any method.');
+              logger.log(`   ┗ Error using escape key: ${err2.message}`);
+              logger.log('   ┗ Could not close modal using any method.');
             }
           }
         }
       } catch (err) {
-        console.log(`❌ [Meeting Patterns] Error closing modal: ${err.message}`);
-        console.log('   ┗ Trying fallback methods...');
+        logger.log(`❌ [Meeting Patterns] Error closing modal: ${err.message}`);
+        logger.log('   ┗ Trying fallback methods...');
 
         const fallbackClose = meetingDialog.locator('button[aria-label="Close modal"]');
         if (await fallbackClose.count() > 0) {
           await fallbackClose.first().click();
           await page.waitForTimeout(500);
-          console.log('   ┗ "Set Details" modal closed via fallback close icon.');
+          logger.log('   ┗ "Set Details" modal closed via fallback close icon.');
         } else {
-          console.log(`   ┗ Close icon fallback also missing, trying escape key.`);
+          logger.log(`   ┗ Close icon fallback also missing, trying escape key.`);
           try {
             await page.keyboard.press('Escape');
             await page.waitForTimeout(500);
-            console.log('   ┗ "Set Details" modal closed via escape key fallback.');
+            logger.log('   ┗ "Set Details" modal closed via escape key fallback.');
           } catch (escapeErr) {
-            console.log(`   ┗ Escape key fallback also failed: ${escapeErr.message}`);
-            console.log('   ┗ Could not close modal using any method.');
+            logger.log(`   ┗ Escape key fallback also failed: ${escapeErr.message}`);
+            logger.log('   ┗ Could not close modal using any method.');
           }
         }
       }
     } else {
-      console.log('⚠️ [Meeting Patterns] Could not find close button for "Set Details" modal.');
-      console.log('   ┗ Trying fallback methods...');
+      logger.log('⚠️ [Meeting Patterns] Could not find close button for "Set Details" modal.');
+      logger.log('   ┗ Trying fallback methods...');
 
       const fallbackClose = meetingDialog.locator('button[aria-label="Close modal"]');
       if (await fallbackClose.count() > 0) {
         await fallbackClose.first().click();
         await page.waitForTimeout(500);
-        console.log('   ┗ "Set Details" modal closed via fallback close icon.');
+        logger.log('   ┗ "Set Details" modal closed via fallback close icon.');
       } else {
-        console.log(`   ┗ Close icon fallback missing, trying escape key.`);
+        logger.log(`   ┗ Close icon fallback missing, trying escape key.`);
         try {
           await page.keyboard.press('Escape');
           await page.waitForTimeout(500);
-          console.log('   ┗ "Set Details" modal closed via escape key fallback.');
+          logger.log('   ┗ "Set Details" modal closed via escape key fallback.');
         } catch (escapeErr) {
-          console.log(`   ┗ Escape key fallback also failed: ${escapeErr.message}`);
-          console.log('   ┗ Could not close modal using any method.');
+          logger.log(`   ┗ Escape key fallback also failed: ${escapeErr.message}`);
+          logger.log('   ┗ Could not close modal using any method.');
         }
       }
     }
   } else {
-    console.log('⚠️ [Meeting Patterns] Could not find "Set Details" button.');
+    logger.log('⚠️ [Meeting Patterns] Could not find "Set Details" button.');
   }
 }
 
@@ -2070,53 +2071,53 @@ async function validateAndResetMeetingPatterns(page, outputDir, action) {
  * @param {Object} page - Playwright page object
  * @returns {Promise<boolean>} - True if successful, false otherwise
  */
-async function ignoreDoubleBookings(page) {
+async function ignoreDoubleBookings(page, logger: ILogger) {
   try {
-    console.log('🔄 [Double Bookings] Starting Ignore Double Bookings process...');
+    logger.log('🔄 [Double Bookings] Starting Ignore Double Bookings process...');
 
     // Locate the professors card
     const professorsCard = page.locator('#field-professors');
     if (await professorsCard.count() === 0) {
-      console.log('⚠️ [Double Bookings] Professors card not found.');
+      logger.log('⚠️ [Double Bookings] Professors card not found.');
       return false;
     }
 
-    console.log('✅ [Double Bookings] Found professors card.');
+    logger.log('✅ [Double Bookings] Found professors card.');
 
     // Click on "Set Instructor Roles & Details" button
     const setDetailsBtn = page.locator('button[data-test="openInstructorsMetaDetailsModal"]');
     if (await setDetailsBtn.count() === 0 || !await setDetailsBtn.first().isVisible()) {
-      console.log('⚠️ [Double Bookings] "Set Instructor Roles & Details" button not found or not visible.');
+      logger.log('⚠️ [Double Bookings] "Set Instructor Roles & Details" button not found or not visible.');
       return false;
     }
 
-    console.log('🖱️ [Double Bookings] Clicking "Set Instructor Roles & Details" button...');
+    logger.log('🖱️ [Double Bookings] Clicking "Set Instructor Roles & Details" button...');
     await setDetailsBtn.first().click();
     await page.waitForTimeout(2000);
 
     // Wait for the modal to open
     const modal = page.locator('[data-test="instructorsMetaDetailsModal"]');
     await modal.waitFor({ state: 'visible', timeout: 10000 });
-    console.log('✅ [Double Bookings] Instructor details modal opened.');
+    logger.log('✅ [Double Bookings] Instructor details modal opened.');
 
     // Find all accordion buttons to expand professor details
     const accordionButtons = modal.locator('.flex-1.d-flex.accordion-style--left');
     const buttonCount = await accordionButtons.count();
-    console.log(`📋 [Double Bookings] Found ${buttonCount} professor accordion(s).`);
+    logger.log(`📋 [Double Bookings] Found ${buttonCount} professor accordion(s).`);
 
     if (buttonCount === 0) {
-      console.log('⚠️ [Double Bookings] No professor accordions found in modal.');
-      await closeInstructorModal(page);
+      logger.log('⚠️ [Double Bookings] No professor accordions found in modal.');
+      await closeInstructorModal(page, logger, undefined, undefined, undefined, logger);
       return false;
     }
 
     // Process each professor accordion to set Ignore Double Bookings to Yes
     for (let i = 0; i < buttonCount; i++) {
-      console.log(`🔍 [Double Bookings] Processing professor ${i + 1}/${buttonCount}...`);
+      logger.log(`🔍 [Double Bookings] Processing professor ${i + 1}/${buttonCount}...`);
 
       try {
         // Step 1: First try to find the Ignore Double Bookings field (accordion likely already expanded)
-        console.log(`   🔍 Looking for Ignore Double Bookings field for professor ${i + 1}...`);
+        logger.log(`   🔍 Looking for Ignore Double Bookings field for professor ${i + 1}...`);
 
         const ignoreBookingsFieldset = modal.locator('fieldset[data-test="professors.ignoreDoubleBookings"]');
         let fieldsetFound = false;
@@ -2131,7 +2132,7 @@ async function ignoreDoubleBookings(page) {
 
         // Step 2: If field not found, try expanding the accordion
         if (!fieldsetFound) {
-          console.log(`   🔽 Ignore Double Bookings field not visible, expanding professor accordion ${i + 1}...`);
+          logger.log(`   🔽 Ignore Double Bookings field not visible, expanding professor accordion ${i + 1}...`);
           const accordionBtn = accordionButtons.nth(i);
           await accordionBtn.click();
           await page.waitForTimeout(1500); // Wait for accordion to fully expand
@@ -2142,17 +2143,17 @@ async function ignoreDoubleBookings(page) {
             const fieldsetCount = await ignoreBookingsFieldset.count();
             fieldsetFound = fieldsetCount > 0;
           } catch (waitError2) {
-            console.log(`   ⚠️ Ignore Double Bookings fieldset still not found after expanding accordion for professor ${i + 1}`);
+            logger.log(`   ⚠️ Ignore Double Bookings fieldset still not found after expanding accordion for professor ${i + 1}`);
             continue;
           }
         }
 
         if (!fieldsetFound) {
-          console.log(`   ⚠️ Ignore Double Bookings fieldset not found for professor ${i + 1}`);
+          logger.log(`   ⚠️ Ignore Double Bookings fieldset not found for professor ${i + 1}`);
           continue;
         }
 
-        console.log(`   📋 Found Ignore Double Bookings fieldset for professor ${i + 1}`);
+        logger.log(`   📋 Found Ignore Double Bookings fieldset for professor ${i + 1}`);
 
         // Step 3: Get the YES button within this fieldset
         const yesButton = ignoreBookingsFieldset.locator('button[data-test="YesBtn"]');
@@ -2160,12 +2161,12 @@ async function ignoreDoubleBookings(page) {
         try {
           await yesButton.waitFor({ state: 'visible', timeout: 3000 });
         } catch (buttonWaitError) {
-          console.log(`   ⚠️ YES button not visible for professor ${i + 1}`);
+          logger.log(`   ⚠️ YES button not visible for professor ${i + 1}`);
           continue;
         }
 
         if (await yesButton.count() === 0) {
-          console.log(`   ⚠️ YES button not found in fieldset for professor ${i + 1}`);
+          logger.log(`   ⚠️ YES button not found in fieldset for professor ${i + 1}`);
           continue;
         }
 
@@ -2173,10 +2174,10 @@ async function ignoreDoubleBookings(page) {
         const buttonClass = await yesButton.getAttribute('class') || '';
         const isAlreadyActive = buttonClass.includes('btn-raised');
 
-        console.log(`   🔍 YES button class: "${buttonClass}", already active: ${isAlreadyActive}`);
+        logger.log(`   🔍 YES button class: "${buttonClass}", already active: ${isAlreadyActive}`);
 
         if (!isAlreadyActive) {
-          console.log(`   🖱️ Clicking YES button for professor ${i + 1}...`);
+          logger.log(`   🖱️ Clicking YES button for professor ${i + 1}...`);
           await yesButton.click();
           await page.waitForTimeout(1000);
 
@@ -2185,58 +2186,58 @@ async function ignoreDoubleBookings(page) {
           const isNowActive = updatedButtonClass.includes('btn-raised');
 
           if (isNowActive) {
-            console.log(`   ✅ Successfully set Ignore Double Bookings to YES for professor ${i + 1}`);
+            logger.log(`   ✅ Successfully set Ignore Double Bookings to YES for professor ${i + 1}`);
           } else {
-            console.log(`   ❌ Failed to activate YES button for professor ${i + 1}. Class: "${updatedButtonClass}"`);
+            logger.log(`   ❌ Failed to activate YES button for professor ${i + 1}. Class: "${updatedButtonClass}"`);
           }
         } else {
-          console.log(`   ℹ️ Ignore Double Bookings already set to YES for professor ${i + 1}`);
+          logger.log(`   ℹ️ Ignore Double Bookings already set to YES for professor ${i + 1}`);
         }
 
       } catch (error) {
-        console.log(`   ❌ Error processing professor ${i + 1}: ${error.message}`);
+        logger.log(`   ❌ Error processing professor ${i + 1}: ${error.message}`);
         continue;
       }
     }
 
-    console.log('✅ [Double Bookings] Completed setting Ignore Double Bookings for all professors.');
+    logger.log('✅ [Double Bookings] Completed setting Ignore Double Bookings for all professors.');
 
     // Close the modal
-    console.log('🚪 [Double Bookings] Closing instructor details modal...');
+    logger.log('🚪 [Double Bookings] Closing instructor details modal...');
     const closeBtn = modal.locator('button[data-test="close-modal-btn"]');
     if (await closeBtn.count() > 0 && await closeBtn.first().isVisible()) {
       await closeBtn.first().click();
       await page.waitForTimeout(1000);
       await page.waitForSelector('[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => { });
-      console.log('   ✅ Modal closed via footer successfully.');
+      logger.log('   ✅ Modal closed via footer successfully.');
     } else {
       const xClose = modal.locator('button[aria-label="Close modal"], button[data-test="close-x-btn"], button[data-test="closeby-x-btn"], .modal-header .close');
       if (await xClose.count() > 0 && await xClose.first().isVisible()) {
         await xClose.first().click();
         await page.waitForTimeout(1000);
         await page.waitForSelector('[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => { });
-        console.log('   ✅ Modal closed via header X successfully.');
+        logger.log('   ✅ Modal closed via header X successfully.');
       } else {
         // Fallback: overlay click, then escape
         const overlay = page.locator('div.modal-dimness').last();
         if (await overlay.count() > 0 && await overlay.first().isVisible()) {
           try { await overlay.first().click(); await page.waitForTimeout(1000); } catch (_) { }
-          console.log('   ✅ Modal close attempted via overlay.');
+          logger.log('   ✅ Modal close attempted via overlay.');
         } else {
           try { await page.keyboard.press('Escape'); await page.waitForTimeout(1000); } catch (_) { }
-          console.log('   ✅ Modal close attempted via Escape.');
+          logger.log('   ✅ Modal close attempted via Escape.');
         }
       }
     }
 
-    console.log('🎉 [Double Bookings] Ignore Double Bookings process completed successfully.');
+    logger.log('🎉 [Double Bookings] Ignore Double Bookings process completed successfully.');
     return true;
 
   } catch (error) {
-    console.error(`❌ [Double Bookings] Error in ignoreDoubleBookings function: ${error.message}`);
+    logger.error(`❌ [Double Bookings] Error in ignoreDoubleBookings function: ${error.message}`);
     // Try to close any open modal before returning
     try {
-      await closeInstructorModal(page);
+      await closeInstructorModal(page, undefined, undefined, undefined, undefined, logger);
     } catch (closeError) {
       // Silent fail on close attempt
     }
@@ -2252,8 +2253,8 @@ async function ignoreDoubleBookings(page) {
  * @param {string} outputDir - Output directory (optional, for API error check)
  * @param {string} action - Action being performed (optional, for API error check)
  */
-async function closeInstructorModal(page, browser = null, schoolId = null, outputDir = null, action = null) {
-  console.log('   ┗ Closing instructor modal...');
+async function closeInstructorModal(page, browser = null, schoolId = null, outputDir = null, action = null, logger: ILogger) {
+  logger.log('   ┗ Closing instructor modal...');
   try {
     // Prefer scoped footer close, then header close, then overlay, then escape
     const content = page.locator('[data-test="instructorsMetaDetailsModal"]');
@@ -2277,20 +2278,20 @@ async function closeInstructorModal(page, browser = null, schoolId = null, outpu
       }
     }
 
-    console.log('   ┗ Instructor modal closed successfully.');
+    logger.log('   ┗ Instructor modal closed successfully.');
 
     // Check for API error after closing modal (if parameters provided)
     if (browser && schoolId && outputDir && action) {
-      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action, logger);
       if (apiError) {
-        console.log('❌ API error detected after closing instructor modal');
+        logger.log('❌ API error detected after closing instructor modal');
         return true; // Return true to indicate error was found
       }
     }
 
     return false; // Return false to indicate no error
   } catch (err) {
-    console.log(`   ┗ Error closing instructor modal: ${err.message}`);
+    logger.log(`   ┗ Error closing instructor modal: ${err.message}`);
     return false;
   }
 }
@@ -2304,33 +2305,33 @@ async function closeInstructorModal(page, browser = null, schoolId = null, outpu
  * @param {string} action - Action being performed
  * @returns {Promise<boolean>} - True if error was found and handled, false if no error
  */
-async function checkForApiError(page, outputDir, browser, schoolId, action) {
+async function checkForApiError(page, outputDir, browser, schoolId, action, logger: ILogger) {
   try {
-    console.log('🔍 Checking for API error notification...');
+    logger.log('🔍 Checking for API error notification...');
     await page.waitForTimeout(2000); // Wait 2 seconds for notification to appear
 
     const errorNotification = page.locator('div.notif.notif--error[data-test="apiErrorNotification"]');
     const errorCount = await errorNotification.count();
 
     if (errorCount > 0 && await errorNotification.first().isVisible()) {
-      console.log('⚠️ API error notification detected!');
+      logger.log('⚠️ API error notification detected!');
 
       // Click the details button to see more information
       const detailsButton = errorNotification.locator('button.btn.btn-light.notif__details-btn');
       if (await detailsButton.count() > 0) {
-        console.log('🔍 Clicking details button to view error information...');
+        logger.log('🔍 Clicking details button to view error information...');
         await detailsButton.first().click();
         await page.waitForTimeout(1500); // Wait for modal to appear
 
         // Look for the error details modal
         const modalDialog = page.locator('.modal-dialog, [role="dialog"]');
         if (await modalDialog.count() > 0 && await modalDialog.first().isVisible()) {
-          console.log('📋 Error details modal opened');
+          logger.log('📋 Error details modal opened');
 
           // Take screenshot of the error modal
           const errorModalScreenshot = path.join(outputDir, `${action}-api-error-modal.png`);
           await page.screenshot({ path: errorModalScreenshot, fullPage: true });
-          console.log(`📸 Error modal screenshot saved to: ${errorModalScreenshot}`);
+          logger.log(`📸 Error modal screenshot saved to: ${errorModalScreenshot}`);
 
           // Extract error details from the modal
           let responseStatus = 'Not found';
@@ -2354,7 +2355,7 @@ async function checkForApiError(page, outputDir, browser, schoolId, action) {
               }
 
               if (errorText && errorText.trim() !== '') {
-                console.log(`📋 Successfully extracted error text (${errorText.length} characters)`);
+                logger.log(`📋 Successfully extracted error text (${errorText.length} characters)`);
 
                 // Extract Response Status
                 const statusMatch = errorText.match(/Response Status:\s*(\d+)/i);
@@ -2368,21 +2369,21 @@ async function checkForApiError(page, outputDir, browser, schoolId, action) {
                   responseData = dataMatch[1].trim();
                 }
               } else {
-                console.log(`⚠️ Could not extract text from error textarea`);
+                logger.log(`⚠️ Could not extract text from error textarea`);
               }
             }
           } catch (err) {
-            console.log(`⚠️ Error extracting details from textarea: ${err.message}`);
+            logger.log(`⚠️ Error extracting details from textarea: ${err.message}`);
           }
 
           // Log the template issue
-          console.log('\n❌ ═══════════════════════════════════════════════════════');
-          console.log('❌ TEMPLATE ISSUE DETECTED');
-          console.log('❌ ═══════════════════════════════════════════════════════');
-          console.log(`Response Status: ${responseStatus}`);
-          console.log(`Response Data: ${responseData}`);
-          console.log('Please fix the error and try again.');
-          console.log('❌ ═══════════════════════════════════════════════════════\n');
+          logger.log('\n❌ ═══════════════════════════════════════════════════════');
+          logger.log('❌ TEMPLATE ISSUE DETECTED');
+          logger.log('❌ ═══════════════════════════════════════════════════════');
+          logger.log(`Response Status: ${responseStatus}`);
+          logger.log(`Response Data: ${responseData}`);
+          logger.log('Please fix the error and try again.');
+          logger.log('❌ ═══════════════════════════════════════════════════════\n');
         }
       }
 
@@ -2402,28 +2403,28 @@ async function checkForApiError(page, outputDir, browser, schoolId, action) {
             true
           );
           if (takeoverResult.success) {
-            console.log('✅ User intervention successful - issue resolved');
+            logger.log('✅ User intervention successful - issue resolved');
             return false; // Return false to indicate error was handled
           }
         }
       }
 
       // User declined or timeout - return true to indicate error was found
-      console.log('⚠️ API error detected, skipping merge report polling');
+      logger.log('⚠️ API error detected, skipping merge report polling');
       return true;
     }
 
-    console.log('✅ No API error notification detected');
+    logger.log('✅ No API error notification detected');
     return false; // No error found
 
   } catch (error) {
-    console.log(`⚠️ Error while checking for API error notification: ${error.message}`);
+    logger.log(`⚠️ Error while checking for API error notification: ${error.message}`);
     return false; // Continue normally if check fails
   }
 }
 
-async function validateAndResetProfessors(page, outputDir, action, browser = null, schoolId = '', beforeValues = null, dateStr = '') {
-  console.log('🔎 [Professors] Locating Instructors card...');
+async function validateAndResetProfessors(page, outputDir, action, browser = null, schoolId = '', beforeValues = null, dateStr = '', logger: ILogger) {
+  logger.log('🔎 [Professors] Locating Instructors card...');
   const instructorsCard = page.locator('[data-card-id="instructors"]');
 
   // Remove all existing professors
@@ -2437,10 +2438,10 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
       const removeBtn = instructorsCard.locator('button[data-test^="remove_professor_"]');
       if (await removeBtn.count() > 0 && await removeBtn.first().isVisible()) {
         await removeBtn.first().click();
-        console.log(`🗑️ [Professors] Removed a professor`);
+        logger.log(`🗑️ [Professors] Removed a professor`);
         await page.waitForTimeout(500);
       } else {
-        console.log(`⚠️ [Professors] Remove button not found or not visible for professor`);
+        logger.log(`⚠️ [Professors] Remove button not found or not visible for professor`);
         break;
       }
     } else {
@@ -2448,24 +2449,24 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
     }
   }
   if (!foundAny) {
-    console.log('ℹ️ [Professors] No professors found to remove.');
+    logger.log('ℹ️ [Professors] No professors found to remove.');
   } else {
-    console.log(`✅ [Professors] All professors removed`);
+    logger.log(`✅ [Professors] All professors removed`);
   }
 
   // Add a new professor
   const addProfBtn = instructorsCard.locator('button.btn.btn-primary', { hasText: 'INSTRUCTOR' });
   if (await addProfBtn.count() > 0 && await addProfBtn.first().isVisible()) {
     await addProfBtn.first().click();
-    console.log('➕ [Professors] Clicked add instructor button.');
+    logger.log('➕ [Professors] Clicked add instructor button.');
     await page.waitForTimeout(7000); // Wait for modal to open
 
     // Check for API error immediately after opening instructor modal
     if (browser && schoolId && outputDir) {
-      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+      const apiError = await checkForApiError(page, outputDir, browser, schoolId, action, logger);
       if (apiError) {
-        console.log('❌ API error detected after opening instructor modal');
-        await closeInstructorModal(page); // Close modal without API check (already checked)
+        logger.log('❌ API error detected after opening instructor modal');
+        await closeInstructorModal(page, undefined, undefined, undefined, undefined, logger); // Close modal without API check (already checked)
         return false;
       }
     }
@@ -2473,10 +2474,10 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
     // Check for "No instructors found." message
     const noInstructorsText = page.locator('.text-muted', { hasText: 'No instructors found.' });
     if (await noInstructorsText.count() > 0 && await noInstructorsText.first().isVisible()) {
-      console.log('⚠️ [Professors] No instructors found for this department');
+      logger.log('⚠️ [Professors] No instructors found for this department');
 
       // Try to toggle to search all instructors instead of closing
-      console.log('   ┣ Attempting to toggle search to all instructors...');
+      logger.log('   ┣ Attempting to toggle search to all instructors...');
 
       // Try multiple approaches to find and click the toggle
       let toggleClicked = false;
@@ -2486,7 +2487,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
       if (await sameDepartmentCheck.count() > 0) {
         try {
           await sameDepartmentCheck.click({ force: true });
-          console.log('   ┣ ✅ Toggled same-department-check (force click) to search all instructors');
+          logger.log('   ┣ ✅ Toggled same-department-check (force click) to search all instructors');
           toggleClicked = true;
         } catch (forceError) {
           // Silent fallback - try other approaches
@@ -2511,7 +2512,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
               const isVisible = await labelElement.first().isVisible();
               if (isVisible) {
                 await labelElement.first().click();
-                console.log(`   ┣ ✅ Toggled via label/container (${labelSelector}) to search all instructors`);
+                logger.log(`   ┣ ✅ Toggled via label/container (${labelSelector}) to search all instructors`);
                 toggleClicked = true;
                 break;
               }
@@ -2538,7 +2539,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
               const isVisible = await textElement.isVisible();
               if (isVisible) {
                 await textElement.click();
-                console.log(`   ┣ ✅ Toggled via text selector (${textSelector}) to search all instructors`);
+                logger.log(`   ┣ ✅ Toggled via text selector (${textSelector}) to search all instructors`);
                 toggleClicked = true;
                 break;
               }
@@ -2554,10 +2555,10 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
 
         // Check for API error immediately after the wait (while notification is still visible)
         if (browser && schoolId && outputDir) {
-          const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+          const apiError = await checkForApiError(page, outputDir, browser, schoolId, action, logger);
           if (apiError) {
-            console.log('❌ API error detected while loading instructors');
-            await closeInstructorModal(page); // Close modal without API check (already checked)
+            logger.log('❌ API error detected while loading instructors');
+            await closeInstructorModal(page, undefined, undefined, undefined, undefined, logger); // Close modal without API check (already checked)
             return false;
           }
         }
@@ -2567,21 +2568,21 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
         const stillNoInstructors = await instructorListUpdated.count() > 0 && await instructorListUpdated.first().isVisible();
 
         if (!stillNoInstructors) {
-          console.log('   ┣ ✅ Instructors now available after toggling to all instructors');
+          logger.log('   ┣ ✅ Instructors now available after toggling to all instructors');
           // Continue with instructor selection - don't return here
         } else {
-          console.log('   ┣ ⚠️ Still no instructors found even after toggling to all instructors');
+          logger.log('   ┣ ⚠️ Still no instructors found even after toggling to all instructors');
           // Close modal and check for API error
-          const apiError = await closeInstructorModal(page, browser, schoolId, outputDir, action);
+          const apiError = await closeInstructorModal(page, browser, schoolId, outputDir, action, logger);
           if (apiError) {
             return false;
           }
           return;
         }
       } else {
-        console.log('   ┣ ⚠️ Could not find or click the all instructors toggle, closing modal');
+        logger.log('   ┣ ⚠️ Could not find or click the all instructors toggle, closing modal');
         // Close modal and check for API error
-        const apiError = await closeInstructorModal(page, browser, schoolId, outputDir, action);
+        const apiError = await closeInstructorModal(page, browser, schoolId, outputDir, action, logger);
         if (apiError) {
           return false;
         }
@@ -2591,7 +2592,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
 
     // Try multiple approaches to find and select a professor
 
-    console.log('🔍 [Professors] Searching for professors in modal...');
+    logger.log('🔍 [Professors] Searching for professors in modal...');
     await page.waitForTimeout(2000);
 
     let professorSelected = false;
@@ -2602,19 +2603,19 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
       if (await firstProfessorRow.count() > 0) {
         const conflictsLabel = firstProfessorRow.locator('[data-test="conflicts-label"]');
         const conflictsCount = await conflictsLabel.count();
-        console.log(`   ┣ Looking for [data-test="conflicts-label"] in first professor row (found ${conflictsCount})`);
+        logger.log(`   ┣ Looking for [data-test="conflicts-label"] in first professor row (found ${conflictsCount})`);
         if (conflictsCount > 0) {
           try { await conflictsLabel.first().evaluate(el => el.scrollIntoView({ block: 'center', inline: 'center' })); } catch { }
           try {
             await conflictsLabel.first().evaluate(el => el.click());
             professorSelected = true;
-            console.log('👤 [Professors] Selected professor via click on conflicts label.');
+            logger.log('👤 [Professors] Selected professor via click on conflicts label.');
             await page.waitForTimeout(1000);
           } catch (e1) {
             try {
               await conflictsLabel.first().click({ force: true });
               professorSelected = true;
-              console.log('👤 [Professors] Selected professor via force click on conflicts label.');
+              logger.log('👤 [Professors] Selected professor via force click on conflicts label.');
               await page.waitForTimeout(1000);
             } catch (e2) {
               // continue to broader conflicts label search below
@@ -2631,13 +2632,13 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
           try {
             await anyConflictsLabel.evaluate(el => el.click());
             professorSelected = true;
-            console.log('👤 [Professors] Selected professor via modal conflicts label.');
+            logger.log('👤 [Professors] Selected professor via modal conflicts label.');
             await page.waitForTimeout(1000);
           } catch (e3) {
             try {
               await anyConflictsLabel.click({ force: true });
               professorSelected = true;
-              console.log('👤 [Professors] Selected professor via force click on modal conflicts label.');
+              logger.log('👤 [Professors] Selected professor via force click on modal conflicts label.');
               await page.waitForTimeout(1000);
             } catch (e4) {
               // leave professorSelected as false; other strategies will follow
@@ -2650,16 +2651,16 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
     // First, try to click an "Add Set" button directly
     const addSetButtons = page.locator('button:text("Add Set")');
     const addSetCount = await addSetButtons.count();
-    console.log(`   ┣ Found ${addSetCount} "Add Set" buttons`);
+    logger.log(`   ┣ Found ${addSetCount} "Add Set" buttons`);
 
     if (addSetCount > 0) {
       try {
         await addSetButtons.first().click();
-        console.log('👤 [Professors] Clicked "Add Set" button for first professor.');
+        logger.log('👤 [Professors] Clicked "Add Set" button for first professor.');
         professorSelected = true;
         await page.waitForTimeout(1000);
       } catch (error) {
-        console.log(`   ┗ Failed to click "Add Set" button: ${error.message}`);
+        logger.log(`   ┗ Failed to click "Add Set" button: ${error.message}`);
       }
     }
 
@@ -2675,7 +2676,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
         const btnCount = await addBtns.count();
         if (btnCount === 0) continue;
 
-        console.log(`   ┣ Trying add button selector: ${btnSelector} (found ${btnCount})`);
+        logger.log(`   ┣ Trying add button selector: ${btnSelector} (found ${btnCount})`);
         const addBtn = addBtns.first();
         try {
           // Ensure button is in view
@@ -2685,22 +2686,22 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
           try {
             await addBtn.evaluate(el => el.click());
             professorSelected = true;
-            console.log('👤 [Professors] Selected professor via JS click on add button.');
+            logger.log('👤 [Professors] Selected professor via JS click on add button.');
           } catch (e1) {
             // Strategy 2: Force click
             try {
               await addBtn.click({ force: true });
               professorSelected = true;
-              console.log('👤 [Professors] Selected professor via force click on add button.');
+              logger.log('👤 [Professors] Selected professor via force click on add button.');
             } catch (e2) {
               // Strategy 3: Focus + Enter
               try {
                 await addBtn.focus();
                 await page.keyboard.press('Enter');
                 professorSelected = true;
-                console.log('👤 [Professors] Selected professor via keyboard on focused add button.');
+                logger.log('👤 [Professors] Selected professor via keyboard on focused add button.');
               } catch (e3) {
-                console.log(`   ┗ All click strategies failed for ${btnSelector}: ${e3.message}`);
+                logger.log(`   ┗ All click strategies failed for ${btnSelector}: ${e3.message}`);
               }
             }
           }
@@ -2710,7 +2711,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
             break;
           }
         } catch (btnErr) {
-          console.log(`   ┗ Error interacting with add button: ${btnErr.message}`);
+          logger.log(`   ┗ Error interacting with add button: ${btnErr.message}`);
         }
       }
     }
@@ -2724,10 +2725,10 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
       ];
 
       for (const selector of professorSelectors) {
-        console.log(`   ┣ Trying selector: ${selector}`);
+        logger.log(`   ┣ Trying selector: ${selector}`);
         const professors = page.locator(selector);
         const count = await professors.count();
-        console.log(`   ┗ Found ${count} elements`);
+        logger.log(`   ┗ Found ${count} elements`);
 
         if (count > 0) {
           try {
@@ -2742,29 +2743,29 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
                 try {
                   await innerBtn.first().evaluate(el => el.click());
                   professorSelected = true;
-                  console.log('👤 [Professors] Selected professor via inner button in row.');
+                  logger.log('👤 [Professors] Selected professor via inner button in row.');
                 } catch (ib1) {
                   try {
                     await innerBtn.first().click({ force: true });
                     professorSelected = true;
-                    console.log('👤 [Professors] Selected professor via force click on inner button.');
+                    logger.log('👤 [Professors] Selected professor via force click on inner button.');
                   } catch (ib2) {
                     // Fall back to row click as very last attempt
                     await firstProf.click({ force: true });
                     professorSelected = true;
-                    console.log('👤 [Professors] Selected professor via force click on row.');
+                    logger.log('👤 [Professors] Selected professor via force click on row.');
                   }
                 }
               } else {
                 await firstProf.click({ force: true });
                 professorSelected = true;
-                console.log('👤 [Professors] Selected first professor in modal via container.');
+                logger.log('👤 [Professors] Selected first professor in modal via container.');
               }
               await page.waitForTimeout(1000);
               break;
             }
           } catch (error) {
-            console.log(`   ┗ Click failed with ${selector}: ${error.message}`);
+            logger.log(`   ┗ Click failed with ${selector}: ${error.message}`);
             continue;
           }
         }
@@ -2772,7 +2773,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
     }
 
     if (!professorSelected) {
-      console.log('⚠️ [Professors] Could not select any professor. Attempting to close modal...');
+      logger.log('⚠️ [Professors] Could not select any professor. Attempting to close modal...');
       // Try to close the modal to prevent UI blocking
       const closeSelectors = ['button:text("CANCEL")', 'button:text("Cancel")', '.modal-header button[aria-label="Close"]'];
       for (const closeSelector of closeSelectors) {
@@ -2780,14 +2781,14 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
         if (await closeBtn.count() > 0) {
           try {
             await closeBtn.first().click();
-            console.log(`🚪 [Professors] Closed professor modal using: ${closeSelector}`);
+            logger.log(`🚪 [Professors] Closed professor modal using: ${closeSelector}`);
             await page.waitForTimeout(1000);
 
             // Check for API error before returning
             if (browser && schoolId && outputDir) {
-              const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+              const apiError = await checkForApiError(page, outputDir, browser, schoolId, action, logger);
               if (apiError) {
-                console.log('❌ API error detected after closing professor modal');
+                logger.log('❌ API error detected after closing professor modal');
                 return false;
               }
             }
@@ -2800,9 +2801,9 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
 
       // Check for API error before final return
       if (browser && schoolId && outputDir) {
-        const apiError = await checkForApiError(page, outputDir, browser, schoolId, action);
+        const apiError = await checkForApiError(page, outputDir, browser, schoolId, action, logger);
         if (apiError) {
-          console.log('❌ API error detected, modal could not be closed');
+          logger.log('❌ API error detected, modal could not be closed');
           return false;
         }
       }
@@ -2812,7 +2813,7 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
     const openDetailsBtn = page.locator('button[data-test="openInstructorsMetaDetailsModal"]');
     if (await openDetailsBtn.count() > 0 && await openDetailsBtn.first().isVisible()) {
       await openDetailsBtn.first().click();
-      console.log('⚙️ [Professors] Opened instructor details modal.');
+      logger.log('⚙️ [Professors] Opened instructor details modal.');
       // Wait for modal dialog
       const modal = page.locator('div.modal-dialog');
       const detailsModal = modal.locator('h3.app-heading', { hasText: 'Set Instructor Roles & Details' });
@@ -2822,43 +2823,43 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
       const profDetails = modal.locator('span.btn.btn-dark.pl-0.py-3.font-weight-bold.text-capitalize');
       if (await profDetails.count() > 0 && await profDetails.first().isVisible()) {
         await profDetails.first().click();
-        console.log('👤 [Professors] Expanded on Professor details.');
+        logger.log('👤 [Professors] Expanded on Professor details.');
         await page.waitForTimeout(1000);
 
         // Note: "before" screenshot moved to meetAndProfDetails()
       } else {
-        console.log('⚠️ [Professors] Could not find expand button.');
+        logger.log('⚠️ [Professors] Could not find expand button.');
       }
       // Select meeting: Check if already has value first
-      console.log('📅 [Professors] Validating meeting dropdown...');
+      logger.log('📅 [Professors] Validating meeting dropdown...');
       const meetingDropdown = modal.locator('.multiselect:has(input[placeholder="Set Instr. Meeting"])');
       if (await meetingDropdown.count() > 0) {
-        await selectDropdownIfEmpty(meetingDropdown.first(), 'Instructor Meeting', modal);
+        await selectDropdownIfEmpty(meetingDropdown.first(), 'Instructor Meeting', modal, logger);
       } else {
         // Fallback: try the old method for highlighted options if dropdown structure is different
         const highlightedOption = modal.locator('.multiselect__option--highlight').first();
         if (await highlightedOption.count() > 0 && await highlightedOption.isVisible()) {
           await highlightedOption.click();
-          console.log('📅 [Professors] Set first meeting option (highlighted).');
+          logger.log('📅 [Professors] Set first meeting option (highlighted).');
         } else {
-          console.log('⚠️ [Professors] Meeting dropdown not found with expected structure.');
+          logger.log('⚠️ [Professors] Meeting dropdown not found with expected structure.');
         }
       }
       // Select instructional method: Check if already has value first
-      console.log('🎓 [Professors] Validating instructional method dropdown...');
+      logger.log('🎓 [Professors] Validating instructional method dropdown...');
       const instrMethodDropdown = modal.locator('.multiselect:has(input[placeholder="Set Instr. Instructional Method"])');
       if (await instrMethodDropdown.count() > 0) {
-        await selectDropdownIfEmpty(instrMethodDropdown.first(), 'Instructional Method', modal);
+        await selectDropdownIfEmpty(instrMethodDropdown.first(), 'Instructional Method', modal, logger);
       } else {
-        console.log('⚠️ [Professors] Instructional method dropdown not found with expected structure.');
+        logger.log('⚠️ [Professors] Instructional method dropdown not found with expected structure.');
       }
 
       // Fallback: Try all available dropdowns if the specific ones weren't handled (limit to 5 to avoid UI issues)
-      console.log('🔄 [Professors] Validating all remaining dropdowns as fallback...');
+      logger.log('🔄 [Professors] Validating all remaining dropdowns as fallback...');
       const allDropdowns = modal.locator('.multiselect');
       const dropdownCount = await allDropdowns.count();
       const maxDropdowns = Math.min(dropdownCount, 5); // Limit to 5 dropdowns maximum
-      console.log(`   ┣ Found ${dropdownCount} total dropdown(s) in modal, processing first ${maxDropdowns}`);
+      logger.log(`   ┣ Found ${dropdownCount} total dropdown(s) in modal, processing first ${maxDropdowns}`);
 
       for (let i = 0; i < maxDropdowns; i++) {
         const dropdown = allDropdowns.nth(i);
@@ -2867,27 +2868,27 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
           const classAttr = await dropdown.getAttribute('class');
           const isDisabled = classAttr?.includes('multiselect--disabled');
           if (isDisabled) {
-            console.log(`   ┗ Dropdown #${i + 1} is disabled, skipping.`);
+            logger.log(`   ┗ Dropdown #${i + 1} is disabled, skipping.`);
             continue;
           }
 
-          console.log(`   ┣ Validating dropdown #${i + 1}...`);
-          await selectDropdownIfEmpty(dropdown, `Professor Dropdown #${i + 1}`, modal);
+          logger.log(`   ┣ Validating dropdown #${i + 1}...`);
+          await selectDropdownIfEmpty(dropdown, `Professor Dropdown #${i + 1}`, modal, logger);
         }
       }
 
       if (dropdownCount > 5) {
-        console.log(`   ┗ Skipped ${dropdownCount - 5} additional dropdowns to avoid UI timeout issues.`);
+        logger.log(`   ┗ Skipped ${dropdownCount - 5} additional dropdowns to avoid UI timeout issues.`);
       }
       // Close the modal
       const modalFooter = modal.locator('.modal-footer');
       const closeBtn = modalFooter.locator('button[data-test="close-modal-btn"]');
       if (await closeBtn.count() > 0) {
-        console.log('❌ [Instructional Method] Attempting to close instructor details modal (scoped to modal footer)...');
+        logger.log('❌ [Instructional Method] Attempting to close instructor details modal (scoped to modal footer)...');
         await page.waitForTimeout(500);
         const isVisible = await closeBtn.first().isVisible();
         const isEnabled = await closeBtn.first().isEnabled();
-        console.log(`Close button (footer) visible: ${isVisible}, enabled: ${isEnabled}`);
+        logger.log(`Close button (footer) visible: ${isVisible}, enabled: ${isEnabled}`);
 
         await page.waitForTimeout(1000);
 
@@ -2896,43 +2897,43 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
         const screenshotAfter = path.join(outputDir, `${action}-section-Instructor-Details-After.png`);
         await modalContent.screenshot({ path: screenshotAfter });
 
-        console.log(`\n✅ Screenshot saved to ${screenshotAfter}`);
+        logger.log(`\n✅ Screenshot saved to ${screenshotAfter}`);
         if (isVisible && isEnabled) {
           await closeBtn.first().click();
           await page.waitForTimeout(500);
           // Wait for modal to disappear
           await page.waitForSelector('div[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => { });
-          console.log('   ┗ "instructor details" modal closed.');
+          logger.log('   ┗ "instructor details" modal closed.');
         } else {
-          console.log('⚠️ [Instructional Method] Close button in modal footer not visible or not enabled. Attempting to click outside modal as fallback...');
+          logger.log('⚠️ [Instructional Method] Close button in modal footer not visible or not enabled. Attempting to click outside modal as fallback...');
           // Fallback: click outside the modal to close
           const body = page.locator('body');
           await body.click({ position: { x: 10, y: 10 } });
           await page.waitForTimeout(500);
           await page.waitForSelector('div[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => { });
-          console.log('   ┗ Fallback: Clicked outside modal to close it.');
+          logger.log('   ┗ Fallback: Clicked outside modal to close it.');
         }
       } else {
-        console.log('⚠️ [Instructional Method] Close button in modal footer not found. Attempting to click outside modal as fallback...');
+        logger.log('⚠️ [Instructional Method] Close button in modal footer not found. Attempting to click outside modal as fallback...');
 
         const body = page.locator('body');
         await body.click({ position: { x: 10, y: 10 } });
         await page.waitForTimeout(500);
         await page.waitForSelector('div[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => { });
-        console.log('   ┗ Fallback: Clicked outside modal to close it.');
+        logger.log('   ┗ Fallback: Clicked outside modal to close it.');
       }
     } else {
-      console.log('⚠️ [Professors] Could not find openInstructorsMetaDetailsModal button.');
+      logger.log('⚠️ [Professors] Could not find openInstructorsMetaDetailsModal button.');
       if (!professorSelected) {
         // Only attempt to close selection modal if no professor was selected
-        console.log('🚪 [Professors] Attempting to close professor assignment modal (no professor selected)...');
+        logger.log('🚪 [Professors] Attempting to close professor assignment modal (no professor selected)...');
         const closeSelectors = ['button:text("CANCEL")', 'button:text("Cancel")', '.modal-header button[aria-label="Close"]'];
         for (const closeSelector of closeSelectors) {
           const closeBtn = page.locator(closeSelector);
           if (await closeBtn.count() > 0) {
             try {
               await closeBtn.first().click();
-              console.log(`🚪 [Professors] Closed professor assignment modal using: ${closeSelector}`);
+              logger.log(`🚪 [Professors] Closed professor assignment modal using: ${closeSelector}`);
               await page.waitForTimeout(1000);
               break;
             } catch (error) {
@@ -2941,18 +2942,18 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
           }
         }
       } else {
-        console.log('ℹ️ [Professors] Skipping modal close because a professor was selected and the modal should auto-close.');
+        logger.log('ℹ️ [Professors] Skipping modal close because a professor was selected and the modal should auto-close.');
       }
     }
   } else {
-    console.log('⚠️ [Professors] Could not find add instructor button.');
+    logger.log('⚠️ [Professors] Could not find add instructor button.');
   }
 
   // Save the section if browser and schoolId are provided (indicating this is the final step)
   if (browser && schoolId) {
     // Capture modal after screenshot and compare field differences before saving
-    console.log('📸 [Professors] Taking "after" screenshot before save...');
-    await captureModalAfter(page, outputDir, action);
+    logger.log('📸 [Professors] Taking "after" screenshot before save...');
+    await captureModalAfter(page, outputDir, action, logger);
 
     try {
       // If no beforeValues provided, use the global diff state or fetch now
@@ -2966,20 +2967,20 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
 
       const afterValues = await readSectionValues(page, schoolId);
       const ts = dateStr || (__diffState.context?.dateStr) || getTimestamp();
-      await writeSectionDiff(effectiveBefore, afterValues, schoolId, outputDir, action, ts);
+      await writeSectionDiff(effectiveBefore, afterValues, schoolId, outputDir, action, ts, logger);
     } catch (err) {
-      console.log(`⚠️ [Professors] Could not generate diff before save: ${err.message}`);
+      logger.log(`⚠️ [Professors] Could not generate diff before save: ${err.message}`);
     }
 
     // Check for API error notification before attempting to save
-    const apiErrorBeforeSave = await checkForApiError(page, outputDir, browser, schoolId, action);
+    const apiErrorBeforeSave = await checkForApiError(page, outputDir, browser, schoolId, action, logger);
     if (apiErrorBeforeSave) {
-      console.log('❌ API error detected during professor setup, cannot save section');
+      logger.log('❌ API error detected during professor setup, cannot save section');
       return false;
     }
 
-    console.log('💾 [Professors] Saving section after professor setup...');
-    const saveSuccess = await saveSection(page, outputDir, action, browser, schoolId);
+    logger.log('💾 [Professors] Saving section after professor setup...');
+    const saveSuccess = await saveSection(page, outputDir, action, browser, schoolId, logger);
     return saveSuccess;
   }
 
@@ -2993,47 +2994,47 @@ async function validateAndResetProfessors(page, outputDir, action, browser = nul
  * @param {string} outputDir
  * @param {string} action
  */
-async function meetAndProfDetails(page, outputDir, action) {
+async function meetAndProfDetails(page, outputDir, action, logger: ILogger) {
   try {
     const sectionModalSelector = '#section-modal-editor';
     const logSectionModalState = async (context) => {
       try {
         const modal = page.locator(sectionModalSelector).first();
         const visible = await modal.isVisible().catch(() => false);
-        console.log(`📌 [${context}] Section modal visible after close attempt? ${visible}`);
+        logger.log(`📌 [${context}] Section modal visible after close attempt? ${visible}`);
       } catch (err) {
-        console.log(`📌 [${context}] Section modal visibility check failed: ${err.message}`);
+        logger.log(`📌 [${context}] Section modal visibility check failed: ${err.message}`);
       }
     };
 
     // Meeting Patterns Details
-    console.log('🔎 [Details] Locating Meeting Patterns & Rooms section for details screenshot...');
+    logger.log('🔎 [Details] Locating Meeting Patterns & Rooms section for details screenshot...');
     const meetingPatternSection = page.locator('[data-card-id="times"]');
     const setDetailsBtn = meetingPatternSection.locator('button[data-test="set_details"]');
     if (await setDetailsBtn.count() > 0 && await setDetailsBtn.first().isVisible()) {
-      console.log('⚙️ [Details] Opening "Set Details" modal...');
+      logger.log('⚙️ [Details] Opening "Set Details" modal...');
       await setDetailsBtn.first().click();
       const detailsModalTitle = page.locator('.app-heading', { hasText: 'Meeting Patterns Additional Information' });
       await detailsModalTitle.waitFor({ state: 'visible', timeout: 10000 }).catch(() => { });
 
       // Wait for actual modal content to load (form fields, not just title)
       const modalContent = page.locator('[data-test="meeting-patterns-details-modal"]');
-      console.log('⏳ [Details] Waiting for Meeting Patterns modal content to load...');
+      logger.log('⏳ [Details] Waiting for Meeting Patterns modal content to load...');
 
       // Try to wait for form elements inside the modal (multiselects, inputs, labels, etc.)
       const modalFormElements = modalContent.locator('.multiselect, input, .form-element, .auto-form-row, label');
       try {
         await modalFormElements.first().waitFor({ state: 'visible', timeout: 8000 });
-        console.log('✅ [Details] Modal content loaded.');
+        logger.log('✅ [Details] Modal content loaded.');
       } catch (_) {
-        console.log('⚠️ [Details] Could not detect form elements in modal, proceeding anyway...');
+        logger.log('⚠️ [Details] Could not detect form elements in modal, proceeding anyway...');
       }
 
       // Additional buffer for async field data
       await page.waitForTimeout(2000);
 
       const mpBeforePath = path.join(outputDir, 'MeetingPattern-Details-Before.png');
-      try { await modalContent.screenshot({ path: mpBeforePath }); console.log(`✅ Saved: ${mpBeforePath}`); } catch (_) { }
+      try { await modalContent.screenshot({ path: mpBeforePath }); logger.log(`✅ Saved: ${mpBeforePath}`); } catch (_) { }
       // Close modal
       const closeBtn = modalContent.locator('button[data-test="close-modal-btn"]');
       if (await closeBtn.count() > 0 && await closeBtn.first().isVisible() && await closeBtn.first().isEnabled()) {
@@ -3042,25 +3043,25 @@ async function meetAndProfDetails(page, outputDir, action) {
         await logSectionModalState('MeetingDetails');
       } else {
         // Fallback close
-        console.log('⚠️ [Meeting Patterns] Primary close button missing, trying scoped fallbacks...');
+        logger.log('⚠️ [Meeting Patterns] Primary close button missing, trying scoped fallbacks...');
         const dialog = modalContent.locator('xpath=ancestor::div[contains(@class,"modal-dialog")]').first();
         const fallbackClose = dialog.locator('button[aria-label="Close modal"], button[data-test="close-x-btn"]');
         if (await fallbackClose.count() > 0 && await fallbackClose.first().isVisible()) {
           await fallbackClose.first().click();
           await page.waitForTimeout(500);
-          console.log('   ┗ "Set Details" modal closed via fallback icon.');
+          logger.log('   ┗ "Set Details" modal closed via fallback icon.');
         } else {
-          console.log('   ┗ No scoped close icon found, attempting Escape key.');
+          logger.log('   ┗ No scoped close icon found, attempting Escape key.');
           try { await page.keyboard.press('Escape'); await page.waitForTimeout(500); } catch (_) { }
         }
         await logSectionModalState('MeetingDetails');
       }
     } else {
-      console.log('ℹ️ [Details] Meeting Patterns details button not found.');
+      logger.log('ℹ️ [Details] Meeting Patterns details button not found.');
     }
 
     // Instructor Details
-    console.log('🔎 [Details] Locating Instructors card for details screenshot...');
+    logger.log('🔎 [Details] Locating Instructors card for details screenshot...');
     const instructorsCard = page.locator('[data-card-id="instructors"]');
     const openDetailsBtn = page.locator('button[data-test="openInstructorsMetaDetailsModal"]');
     if (await openDetailsBtn.count() > 0 && await openDetailsBtn.first().isVisible()) {
@@ -3071,13 +3072,13 @@ async function meetAndProfDetails(page, outputDir, action) {
       await detailsModal.waitFor({ state: 'visible', timeout: 10000 }).catch(() => { });
 
       // Wait for actual modal content to load (form fields, not just title)
-      console.log('⏳ [Details] Waiting for Instructor modal content to load...');
+      logger.log('⏳ [Details] Waiting for Instructor modal content to load...');
       const modalFormElements = modalContent.locator('.multiselect, input, .form-element, .auto-form-row, label');
       try {
         await modalFormElements.first().waitFor({ state: 'visible', timeout: 8000 });
-        console.log('✅ [Details] Instructor modal content loaded.');
+        logger.log('✅ [Details] Instructor modal content loaded.');
       } catch (_) {
-        console.log('⚠️ [Details] Could not detect form elements in instructor modal, proceeding anyway...');
+        logger.log('⚠️ [Details] Could not detect form elements in instructor modal, proceeding anyway...');
       }
 
       // Expand accordion if present
@@ -3088,31 +3089,31 @@ async function meetAndProfDetails(page, outputDir, action) {
       await page.waitForTimeout(2000);
 
       const instrBeforePath = path.join(outputDir, 'section-Instructor-Details-Before.png');
-      try { await modalContent.screenshot({ path: instrBeforePath }); console.log(`✅ Saved: ${instrBeforePath}`); } catch (_) { }
+      try { await modalContent.screenshot({ path: instrBeforePath }); logger.log(`✅ Saved: ${instrBeforePath}`); } catch (_) { }
       // Close modal (prefer footer close)
       const closeBtn = modalContent.locator('.modal-footer button[data-test="close-modal-btn"]');
       if (await closeBtn.count() > 0 && await closeBtn.first().isVisible()) {
-        console.log('   ┗ Found footer close button, clicking...');
+        logger.log('   ┗ Found footer close button, clicking...');
         await closeBtn.first().click();
         await page.waitForTimeout(500);
         await page.waitForSelector('div[data-test="instructorsMetaDetailsModal"]', { state: 'detached', timeout: 5000 }).catch(() => { });
         await logSectionModalState('InstructorsDetails');
       } else {
         // Fallback close
-        console.log('⚠️ [Instructors] Footer close missing, trying scoped fallbacks...');
+        logger.log('⚠️ [Instructors] Footer close missing, trying scoped fallbacks...');
         const fallbackClose = modal.locator('button[aria-label="Close modal"], button[data-test="close-x-btn"], button[data-test="closeby-x-btn"], .modal-header .close');
         if (await fallbackClose.count() > 0 && await fallbackClose.first().isVisible()) {
           await fallbackClose.first().click();
           await page.waitForTimeout(500);
-          console.log('   ┗ Instructor modal closed via fallback icon.');
+          logger.log('   ┗ Instructor modal closed via fallback icon.');
         } else {
           // Try overlay click as a last resort, then escape
           const overlay = page.locator('div.modal-dimness').last();
           if (await overlay.count() > 0 && await overlay.first().isVisible()) {
-            console.log('   ┗ No icon found; attempting overlay click to close topmost modal.');
+            logger.log('   ┗ No icon found; attempting overlay click to close topmost modal.');
             try { await overlay.first().click(); await page.waitForTimeout(500); } catch (_) { }
           } else {
-            console.log('   ┗ Overlay not present; attempting Escape key.');
+            logger.log('   ┗ Overlay not present; attempting Escape key.');
             try { await page.keyboard.press('Escape'); await page.waitForTimeout(500); } catch (_) { }
           }
         }
@@ -3120,12 +3121,12 @@ async function meetAndProfDetails(page, outputDir, action) {
         await logSectionModalState('InstructorsDetails');
       }
     } else {
-      console.log('ℹ️ [Details] Instructor details button not found.');
+      logger.log('ℹ️ [Details] Instructor details button not found.');
     }
 
     return true;
   } catch (err) {
-    console.log(`⚠️ [Details] Error in meetAndProfDetails: ${err.message}`);
+    logger.log(`⚠️ [Details] Error in meetAndProfDetails: ${err.message}`);
     return false;
   }
 }
@@ -3144,7 +3145,7 @@ async function readSectionValues(page, schoolId) {
   const raw = fs.readFileSync(jsonPath, 'utf8');
   const { sectionTemplate } = JSON.parse(raw);
   const questionIds = Object.keys(sectionTemplate.questions || {});
-  const values = { _hiddenFields: {} };
+  const values = { _hiddenFields: {} } as unknown as any;
 
   for (const qid of questionIds) {
     try {
@@ -3335,26 +3336,26 @@ function getLatestSectionTemplateFile(schoolId) {
   return path.join(resourcesDir, matchingFiles[matchingFiles.length - 1]);
 }
 
-async function bannerEthosScheduleType(page) {
-  console.log('🎓 [Banner Ethos] Starting Schedule Type management...');
+async function bannerEthosScheduleType(page, logger: ILogger) {
+  logger.log('🎓 [Banner Ethos] Starting Schedule Type management...');
 
   // Look for the Schedule-Type section
   const scheduleTypeSection = page.locator('[data-test="Schedule-Type"]');
   if (await scheduleTypeSection.count() === 0) {
-    console.log('⚠️ [Banner Ethos] Schedule-Type section not found, skipping.');
+    logger.log('⚠️ [Banner Ethos] Schedule-Type section not found, skipping.');
     return;
   }
 
-  console.log('✅ [Banner Ethos] Found Schedule-Type section.');
+  logger.log('✅ [Banner Ethos] Found Schedule-Type section.');
 
   // Determine number of instructional method fields by id pattern
   const methodFields = scheduleTypeSection.locator('[id^="field-instructionalMethods."][id$=".id"]');
   let methodCount = await methodFields.count();
-  console.log(`📊 [Banner Ethos] Found ${methodCount} instructional method field(s).`);
+  logger.log(`📊 [Banner Ethos] Found ${methodCount} instructional method field(s).`);
 
   // If more than one exists (e.g., id="field-instructionalMethods.1.id"), remove extras until only index 0 remains
   if (methodCount > 1) {
-    console.log('🗑️ [Banner Ethos] Multiple instructional methods detected. Removing extras until only index 0 remains...');
+    logger.log('🗑️ [Banner Ethos] Multiple instructional methods detected. Removing extras until only index 0 remains...');
     // Loop while more than one exists
     while (methodCount > 1) {
       // Prefer removing the last item by legend if available, else fallback to last delete button
@@ -3383,39 +3384,39 @@ async function bannerEthosScheduleType(page) {
       }
 
       if (!removed) {
-        console.log('⚠️ [Banner Ethos] Could not find a delete button to remove extra item.');
+        logger.log('⚠️ [Banner Ethos] Could not find a delete button to remove extra item.');
         break;
       }
 
       await page.waitForTimeout(1000);
       methodCount = await methodFields.count();
-      console.log(`   ┗ After removal, instructional method fields: ${methodCount}`);
+      logger.log(`   ┗ After removal, instructional method fields: ${methodCount}`);
     }
     if (methodCount === 1) {
-      console.log('✅ [Banner Ethos] Reduced to a single instructional method (index 0).');
+      logger.log('✅ [Banner Ethos] Reduced to a single instructional method (index 0).');
     }
   } else if (methodCount === 0) {
-    console.log('ℹ️ [Banner Ethos] No instructional methods found, creating one...');
+    logger.log('ℹ️ [Banner Ethos] No instructional methods found, creating one...');
     const addNewBtn = page.locator('button:has-text("Add New Instructional Method")');
     if (await addNewBtn.count() > 0 && await addNewBtn.first().isVisible()) {
-      console.log('➕ [Banner Ethos] Clicking "Add New Instructional Method" button...');
+      logger.log('➕ [Banner Ethos] Clicking "Add New Instructional Method" button...');
       await addNewBtn.first().click();
       await page.waitForTimeout(2000);
-      console.log('   ┗ New Instructional Method added.');
+      logger.log('   ┗ New Instructional Method added.');
     } else {
-      console.log('⚠️ [Banner Ethos] "Add New Instructional Method" button not found.');
+      logger.log('⚠️ [Banner Ethos] "Add New Instructional Method" button not found.');
       return;
     }
   } else {
-    console.log('✅ [Banner Ethos] Exactly one instructional method present.');
+    logger.log('✅ [Banner Ethos] Exactly one instructional method present.');
   }
 
   // After ensuring we have exactly one Schedule Type Item, select from multiselect
-  console.log('🔽 [Banner Ethos] Selecting from multiselect field...');
+  logger.log('🔽 [Banner Ethos] Selecting from multiselect field...');
 
   const multiselectField = page.locator('#field-instructionalMethods\\.0\\.id');
   if (await multiselectField.count() > 0) {
-    console.log('📋 [Banner Ethos] Found multiselect field, opening dropdown...');
+    logger.log('📋 [Banner Ethos] Found multiselect field, opening dropdown...');
 
     try {
       await multiselectField.click();
@@ -3426,7 +3427,7 @@ async function bannerEthosScheduleType(page) {
       const optionCount = await options.count();
 
       if (optionCount > 0) {
-        console.log(`📋 [Banner Ethos] Found ${optionCount} option(s) in dropdown.`);
+        logger.log(`📋 [Banner Ethos] Found ${optionCount} option(s) in dropdown.`);
 
         // Find the first available (not selected/disabled) option
         let selectedOption = false;
@@ -3437,7 +3438,7 @@ async function bannerEthosScheduleType(page) {
           try {
             const isVisible = await option.isVisible();
             if (!isVisible) {
-              //  console.log(`   ┗ Option ${i + 1} not visible, skipping.`);
+              //  logger.log(`   ┗ Option ${i + 1} not visible, skipping.`);
               continue;
             }
 
@@ -3447,29 +3448,29 @@ async function bannerEthosScheduleType(page) {
             const isDisabled = optionClass.includes('option--disabled') || optionClass.includes('multiselect__option--disabled');
 
             if (isSelected) {
-              console.log(`   ┗ Option ${i + 1} is already selected, skipping.`);
+              logger.log(`   ┗ Option ${i + 1} is already selected, skipping.`);
               continue;
             }
 
             if (isDisabled) {
-              console.log(`   ┗ Option ${i + 1} is disabled, skipping.`);
+              logger.log(`   ┗ Option ${i + 1} is disabled, skipping.`);
               continue;
             }
 
             // Try to click this available option
             await option.click();
-            console.log(`✅ [Banner Ethos] Selected option ${i + 1} from multiselect.`);
+            logger.log(`✅ [Banner Ethos] Selected option ${i + 1} from multiselect.`);
             selectedOption = true;
             break;
 
           } catch (err) {
-            console.log(`   ┗ Error checking option ${i + 1}: ${err.message}, trying next.`);
+            logger.log(`   ┗ Error checking option ${i + 1}: ${err.message}, trying next.`);
             continue;
           }
         }
 
         if (!selectedOption) {
-          console.log('⚠️ [Banner Ethos] No available options found, trying keyboard navigation fallback...');
+          logger.log('⚠️ [Banner Ethos] No available options found, trying keyboard navigation fallback...');
 
           // Fallback: try keyboard navigation
           const input = multiselectField.locator('input.multiselect__input');
@@ -3477,22 +3478,22 @@ async function bannerEthosScheduleType(page) {
             await input.first().press('ArrowDown');
             await page.waitForTimeout(200);
             await input.first().press('Enter');
-            console.log('✅ [Banner Ethos] Selected option via keyboard navigation fallback.');
+            logger.log('✅ [Banner Ethos] Selected option via keyboard navigation fallback.');
           } else {
-            console.log('❌ [Banner Ethos] All options unavailable and keyboard fallback failed.');
+            logger.log('❌ [Banner Ethos] All options unavailable and keyboard fallback failed.');
           }
         }
       } else {
-        console.log('⚠️ [Banner Ethos] No options found in multiselect dropdown.');
+        logger.log('⚠️ [Banner Ethos] No options found in multiselect dropdown.');
       }
     } catch (err) {
-      console.log(`❌ [Banner Ethos] Error interacting with multiselect: ${err.message}`);
+      logger.log(`❌ [Banner Ethos] Error interacting with multiselect: ${err.message}`);
     }
   } else {
-    console.log('⚠️ [Banner Ethos] Multiselect field #field-instructionalMethods.0.id not found.');
+    logger.log('⚠️ [Banner Ethos] Multiselect field #field-instructionalMethods.0.id not found.');
   }
 
-  console.log('✅ [Banner Ethos] Schedule Type management completed.');
+  logger.log('✅ [Banner Ethos] Schedule Type management completed.');
 }
 
 /**
@@ -3500,7 +3501,7 @@ async function bannerEthosScheduleType(page) {
  * @param {Locator} dropdown - The dropdown/multiselect element
  * @returns {Promise<boolean>} - True if dropdown has a selected value, false otherwise
  */
-async function hasSelectedValue(dropdown) {
+async function hasSelectedValue(dropdown, logger: ILogger) {
   try {
     // Primary: vue-multiselect selected value shows up as a tag or a single-value pill.
     // (Do NOT rely on placeholder visibility or input text; those can be true while the menu is open.)
@@ -3525,7 +3526,7 @@ async function hasSelectedValue(dropdown) {
 
     return false;
   } catch (error) {
-    console.log(`   ┗ Error checking dropdown value: ${error.message}`);
+    logger.log(`   ┗ Error checking dropdown value: ${error.message}`);
     return false;
   }
 }
@@ -3537,16 +3538,16 @@ async function hasSelectedValue(dropdown) {
  * @param {Page|Locator} context - The page or modal context for searching options
  * @returns {Promise<boolean>} - True if selection was attempted, false if already had value
  */
-async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
+async function selectDropdownIfEmpty(dropdown, dropdownName, context = null, logger: ILogger) {
   try {
     // First check if dropdown already has a value
-    const hasValue = await hasSelectedValue(dropdown);
+    const hasValue = await hasSelectedValue(dropdown, logger);
     if (hasValue) {
-      console.log(`   ┗ ${dropdownName} already has a selected value, skipping.`);
+      logger.log(`   ┗ ${dropdownName} already has a selected value, skipping.`);
       return false;
     }
 
-    console.log(`   ┗ ${dropdownName} is empty, attempting to select first option...`);
+    logger.log(`   ┗ ${dropdownName} is empty, attempting to select first option...`);
 
     // Proceed with selection using optimized strategies
     let clickSuccess = false;
@@ -3555,9 +3556,9 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
     try {
       await dropdown.evaluate(el => el.click());
       clickSuccess = true;
-      console.log(`   ┃ JavaScript click successful`);
+      logger.log(`   ┃ JavaScript click successful`);
     } catch (jsClickErr) {
-      console.log(`   ┃ JavaScript click failed: ${jsClickErr.message}`);
+      logger.log(`   ┃ JavaScript click failed: ${jsClickErr.message}`);
     }
 
     // Strategy 2: If JavaScript click fails, try regular click with force
@@ -3565,14 +3566,14 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
       try {
         await dropdown.click({ force: true, timeout: 5000 });
         clickSuccess = true;
-        console.log(`   ┃ Force click successful`);
+        logger.log(`   ┃ Force click successful`);
       } catch (clickErr) {
-        console.log(`   ┃ Force click failed: ${clickErr.message}`);
+        logger.log(`   ┃ Force click failed: ${clickErr.message}`);
       }
     }
 
     if (!clickSuccess) {
-      console.log(`   ┗ All click strategies failed for ${dropdownName}, skipping.`);
+      logger.log(`   ┗ All click strategies failed for ${dropdownName}, skipping.`);
       return false;
     }
 
@@ -3641,11 +3642,11 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
 
     if (clicked) {
       await dropdown.page().waitForTimeout(600);
-      let nowHasValue = await hasSelectedValue(dropdown);
+      let nowHasValue = await hasSelectedValue(dropdown, logger);
       // Retry check once more after additional wait
       if (!nowHasValue) {
         await dropdown.page().waitForTimeout(400);
-        nowHasValue = await hasSelectedValue(dropdown);
+        nowHasValue = await hasSelectedValue(dropdown, logger);
       }
       // Retry click if still no value
       if (!nowHasValue && clickedOpt) {
@@ -3657,14 +3658,14 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
             await clickedOpt.click();
           }
           await dropdown.page().waitForTimeout(600);
-          nowHasValue = await hasSelectedValue(dropdown);
+          nowHasValue = await hasSelectedValue(dropdown, logger);
         } catch (_) { }
       }
       if (nowHasValue) {
-        console.log(`   ┗ Successfully selected first option for ${dropdownName}`);
+        logger.log(`   ┗ Successfully selected first option for ${dropdownName}`);
         return true;
       }
-      console.log(`   ┗ Clicked an option for ${dropdownName}, but no value appeared selected.`);
+      logger.log(`   ┗ Clicked an option for ${dropdownName}, but no value appeared selected.`);
       // fall through to typing fallback
       clicked = false;
     } else {
@@ -3672,11 +3673,11 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
     }
 
     // Typing fallback: many Ethos multiselects require typing before real options appear
-    console.log(`   ┃ Entering typing fallback for ${dropdownName}...`);
+    logger.log(`   ┃ Entering typing fallback for ${dropdownName}...`);
     try {
       const multiInput = dropdown.locator('input.multiselect__input, input[type="text"]').first();
       const multiInputCount = await multiInput.count();
-      console.log(`   ┃ Found ${multiInputCount} multiInput element(s)`);
+      logger.log(`   ┃ Found ${multiInputCount} multiInput element(s)`);
       if (multiInputCount > 0) {
         // Ensure input is focusable (vue-multiselect often starts with width:0px until clicked)
         try {
@@ -3689,18 +3690,18 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
 
         const placeholderText = ((await multiInput.getAttribute('placeholder')) || '').toLowerCase();
         const shouldType = placeholderText.includes('type') || placeholderText.includes('search');
-        console.log(`   ┃ Placeholder: "${placeholderText}", shouldType: ${shouldType}`);
+        logger.log(`   ┃ Placeholder: "${placeholderText}", shouldType: ${shouldType}`);
         if (shouldType) {
           const letters = ['a', 'e', 'i', 'o', 'u', 'm', 's', 'd', 'c', 'p'];
           for (const ch of letters) {
-            console.log(`   ┃ Typing '${ch}' for ${dropdownName}...`);
+            logger.log(`   ┃ Typing '${ch}' for ${dropdownName}...`);
             try {
               // Re-click to open dropdown if needed
               try { await dropdown.click({ force: true }); } catch (_) { }
               await dropdown.page().waitForTimeout(300);
               await multiInput.fill(ch);
             } catch (fillErr) {
-              console.log(`   ┃ Fill failed for '${ch}': ${fillErr.message}`);
+              logger.log(`   ┃ Fill failed for '${ch}': ${fillErr.message}`);
               continue;
             }
             await dropdown.page().waitForTimeout(1500);
@@ -3711,7 +3712,7 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
               '[role="option"]:not([aria-disabled="true"])'
             );
             const countAfterType = await optionsAfterType.count();
-            console.log(`   ┃ After typing '${ch}', found ${countAfterType} options`);
+            logger.log(`   ┃ After typing '${ch}', found ${countAfterType} options`);
             const limit = Math.min(countAfterType, 15);
             let picked = false;
             let clickedOpt = null;
@@ -3722,10 +3723,10 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
               const txt = ((await opt.textContent().catch(() => '')) || '').trim();
               if (!txt) continue;
               if (isPlaceholderOption(txt)) {
-                console.log(`   ┃ Skipping placeholder option: "${txt.substring(0, 40)}..."`);
+                logger.log(`   ┃ Skipping placeholder option: "${txt.substring(0, 40)}..."`);
                 continue;
               }
-              console.log(`   ┃ Clicking option: "${txt.substring(0, 40)}..."`);
+              logger.log(`   ┃ Clicking option: "${txt.substring(0, 40)}..."`);
               // Click the inner .multiselect__option span (vue-multiselect attaches handlers there)
               const clickable = opt.locator('.multiselect__option, span').first();
               try {
@@ -3744,16 +3745,16 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
 
             if (picked) {
               await dropdown.page().waitForTimeout(800);
-              let nowHasValue = await hasSelectedValue(dropdown);
-              console.log(`   ┃ After click, hasSelectedValue: ${nowHasValue}`);
+              let nowHasValue = await hasSelectedValue(dropdown, logger);
+              logger.log(`   ┃ After click, hasSelectedValue: ${nowHasValue}`);
               // Retry check with additional wait if needed
               if (!nowHasValue) {
                 await dropdown.page().waitForTimeout(500);
-                nowHasValue = await hasSelectedValue(dropdown);
+                nowHasValue = await hasSelectedValue(dropdown, logger);
               }
               // Retry click once more if still no value
               if (!nowHasValue && clickedOpt) {
-                console.log(`   ┃ Retrying click...`);
+                logger.log(`   ┃ Retrying click...`);
                 try {
                   const clickable = clickedOpt.locator('.multiselect__option, span').first();
                   if (await clickable.count() > 0) {
@@ -3762,11 +3763,11 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
                     await clickedOpt.click();
                   }
                   await dropdown.page().waitForTimeout(800);
-                  nowHasValue = await hasSelectedValue(dropdown);
+                  nowHasValue = await hasSelectedValue(dropdown, logger);
                 } catch (_) { }
               }
               if (nowHasValue) {
-                console.log(`   ┗ Successfully selected option for ${dropdownName} (typed '${ch}')`);
+                logger.log(`   ┗ Successfully selected option for ${dropdownName} (typed '${ch}')`);
                 return true;
               }
             }
@@ -3775,13 +3776,13 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
             await dropdown.page().waitForTimeout(200);
           }
         } else {
-          console.log(`   ┃ Placeholder doesn't require typing, skipping typing fallback`);
+          logger.log(`   ┃ Placeholder doesn't require typing, skipping typing fallback`);
         }
       } else {
-        console.log(`   ┃ No multiInput found for typing fallback`);
+        logger.log(`   ┃ No multiInput found for typing fallback`);
       }
     } catch (typingErr) {
-      console.log(`   ┃ Typing fallback error: ${typingErr.message}`);
+      logger.log(`   ┃ Typing fallback error: ${typingErr.message}`);
     }
 
     // Final fallback: try using keyboard navigation
@@ -3791,19 +3792,19 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
       await dropdown.page().waitForTimeout(200);
       await multiInput.first().press('Enter');
       await dropdown.page().waitForTimeout(300);
-      const nowHasValue = await hasSelectedValue(dropdown);
+      const nowHasValue = await hasSelectedValue(dropdown, logger);
       if (nowHasValue) {
-        console.log(`   ┗ Successfully selected option for ${dropdownName} (keyboard fallback)`);
+        logger.log(`   ┗ Successfully selected option for ${dropdownName} (keyboard fallback)`);
         return true;
       }
-      console.log(`   ┗ Keyboard fallback attempted for ${dropdownName}, but no value appeared selected.`);
+      logger.log(`   ┗ Keyboard fallback attempted for ${dropdownName}, but no value appeared selected.`);
       return false;
     }
 
-    console.log(`   ┗ No selectable options found for ${dropdownName}`);
+    logger.log(`   ┗ No selectable options found for ${dropdownName}`);
     return false;
   } catch (error) {
-    console.log(`   ┗ Error selecting dropdown ${dropdownName}: ${error.message}`);
+    logger.log(`   ┗ Error selecting dropdown ${dropdownName}: ${error.message}`);
     return false;
   }
 }
@@ -3816,7 +3817,7 @@ async function selectDropdownIfEmpty(dropdown, dropdownName, context = null) {
  * @param {string} qid
  * @returns {Promise<boolean>} - true if selection made, false otherwise
  */
-async function selectActiveStatusIfEmpty(wrapper, page, qid) {
+async function selectActiveStatusIfEmpty(wrapper, page, qid, logger: ILogger) {
   try {
     // Safety guard: only operate on status fields
     if (!(qid === 'status' || qid === 'statusCode')) {
@@ -3909,7 +3910,7 @@ async function selectActiveStatusIfEmpty(wrapper, page, qid) {
       return false;
     }
   } catch (err) {
-    console.log(`   ┗ Error selecting active status for [${qid}]: ${err.message}`);
+    logger.log(`   ┗ Error selecting active status for [${qid}]: ${err.message}`);
     return false;
   }
 }
@@ -3919,20 +3920,20 @@ async function selectActiveStatusIfEmpty(wrapper, page, qid) {
  * @param {Page} page - Playwright page object
  * @param {boolean} addSecondSection - false = edit mode (current + 1), true = create mode (2 sections)
  */
-async function addCourseAndSections(page, addSecondSection = false) {
-  console.log(`🎯 [Relationships] Starting intelligent course and section validation...`);
+async function addCourseAndSections(page, addSecondSection = false, logger: ILogger) {
+  logger.log(`🎯 [Relationships] Starting intelligent course and section validation...`);
 
   let targetSections;
 
   if (addSecondSection) {
     // Create mode: always target 2 sections
     targetSections = 2;
-    console.log(`📝 [Create Mode] Target is ${targetSections} section(s)`);
+    logger.log(`📝 [Create Mode] Target is ${targetSections} section(s)`);
   } else {
     // Edit mode: count current sections and add 1 more
     const currentSectionCount = await countAddedSections(page);
     targetSections = currentSectionCount + 1;
-    console.log(`📝 [Edit Mode] Found ${currentSectionCount} existing section(s), target is ${targetSections} (current + 1)`);
+    logger.log(`📝 [Edit Mode] Found ${currentSectionCount} existing section(s), target is ${targetSections} (current + 1)`);
   }
   const maxCourseAttempts = 15;
   let coursesTriedCount = 0;
@@ -3940,30 +3941,30 @@ async function addCourseAndSections(page, addSecondSection = false) {
   while (coursesTriedCount < maxCourseAttempts) {
     // Check current section count at the start of each loop
     const currentSectionCount = await countAddedSections(page);
-    console.log(`📊 [Relationships] Current sections added: ${currentSectionCount}/${targetSections}`);
+    logger.log(`📊 [Relationships] Current sections added: ${currentSectionCount}/${targetSections}`);
 
     if (currentSectionCount >= targetSections) {
-      console.log(`🎉 [Relationships] Target of ${targetSections} sections reached! Stopping course search.`);
+      logger.log(`🎉 [Relationships] Target of ${targetSections} sections reached! Stopping course search.`);
       break;
     }
 
     coursesTriedCount++;
-    console.log(`\n🔄 [Relationships] Course attempt ${coursesTriedCount}/${maxCourseAttempts} (need ${targetSections - currentSectionCount} more section(s))`);
+    logger.log(`\n🔄 [Relationships] Course attempt ${coursesTriedCount}/${maxCourseAttempts} (need ${targetSections - currentSectionCount} more section(s))`);
 
     // Step 1: Find and select a random course
-    const courseSelected = await selectRandomCourse(page, coursesTriedCount);
+    const courseSelected = await selectRandomCourse(page, coursesTriedCount, logger);
     if (!courseSelected) {
-      console.log(`❌ [Relationships] Failed to select course on attempt ${coursesTriedCount}`);
+      logger.log(`❌ [Relationships] Failed to select course on attempt ${coursesTriedCount}`);
       continue;
     }
 
     // Step 2: Validate section count for the selected course
-    const sectionCount = await validateSectionCount(page);
-    console.log(`📊 [Relationships] Course has ${sectionCount} section(s) available`);
+    const sectionCount = await validateSectionCount(page, logger);
+    logger.log(`📊 [Relationships] Course has ${sectionCount} section(s) available`);
 
     if (sectionCount === 0) {
-      console.log(`⚠️ [Relationships] Course has no sections - trying different course...`);
-      await clearCourseSelection(page);
+      logger.log(`⚠️ [Relationships] Course has no sections - trying different course...`);
+      await clearCourseSelection(page, logger);
       continue;
     }
 
@@ -3971,24 +3972,24 @@ async function addCourseAndSections(page, addSecondSection = false) {
     const sectionsNeeded = targetSections - currentSectionCount;
     const sectionsToAdd = Math.min(sectionCount, sectionsNeeded);
 
-    console.log(`🎯 [Relationships] Planning to add ${sectionsToAdd} section(s) from this course (need ${sectionsNeeded}, course has ${sectionCount})`);
+    logger.log(`🎯 [Relationships] Planning to add ${sectionsToAdd} section(s) from this course (need ${sectionsNeeded}, course has ${sectionCount})`);
 
     // Add sections one by one up to what we need
     for (let i = 1; i <= sectionsToAdd; i++) {
-      console.log(`➕ [Relationships] Adding section ${i} of ${sectionsToAdd} from current course...`);
-      const sectionAdded = await addSingleSection(page, i);
+      logger.log(`➕ [Relationships] Adding section ${i} of ${sectionsToAdd} from current course...`);
+      const sectionAdded = await addSingleSection(page, i, logger);
 
       if (!sectionAdded) {
-        console.log(`❌ [Relationships] Failed to add section ${i}, moving to next course`);
+        logger.log(`❌ [Relationships] Failed to add section ${i}, moving to next course`);
         break;
       }
 
       // Check if we've reached our target after each section
       const updatedSectionCount = await countAddedSections(page);
-      console.log(`📊 [Relationships] Updated total: ${updatedSectionCount}/${targetSections} sections`);
+      logger.log(`📊 [Relationships] Updated total: ${updatedSectionCount}/${targetSections} sections`);
 
       if (updatedSectionCount >= targetSections) {
-        console.log(`✅ [Relationships] Target reached! Added ${updatedSectionCount} sections total.`);
+        logger.log(`✅ [Relationships] Target reached! Added ${updatedSectionCount} sections total.`);
         return; // Exit the function immediately when target is reached
       }
     }
@@ -3996,7 +3997,7 @@ async function addCourseAndSections(page, addSecondSection = false) {
     // If we've exhausted this course's sections but still need more, continue to next course
     const finalCurrentCount = await countAddedSections(page);
     if (finalCurrentCount < targetSections) {
-      console.log(`🔄 [Relationships] Still need ${targetSections - finalCurrentCount} more section(s), searching for another course...`);
+      logger.log(`🔄 [Relationships] Still need ${targetSections - finalCurrentCount} more section(s), searching for another course...`);
       // Note: Don't clear course selection here, just continue to next iteration
     }
   }
@@ -4004,20 +4005,20 @@ async function addCourseAndSections(page, addSecondSection = false) {
   // Final validation and warning if we couldn't reach the target
   const finalSectionCount = await countAddedSections(page);
   if (finalSectionCount < targetSections) {
-    console.log(`⚠️ [Relationships] WARNING: Only added ${finalSectionCount} section(s), target was ${targetSections}`);
-    console.log(`⚠️ [Relationships] Tried ${coursesTriedCount} courses but couldn't find enough sections.`);
+    logger.log(`⚠️ [Relationships] WARNING: Only added ${finalSectionCount} section(s), target was ${targetSections}`);
+    logger.log(`⚠️ [Relationships] Tried ${coursesTriedCount} courses but couldn't find enough sections.`);
   } else {
-    console.log(`🎉 [Relationships] SUCCESS! Added ${finalSectionCount} section(s) meeting target of ${targetSections}`);
+    logger.log(`🎉 [Relationships] SUCCESS! Added ${finalSectionCount} section(s) meeting target of ${targetSections}`);
   }
 }
 
 /**
  * Select a random course with retry mechanism
  */
-async function selectRandomCourse(page, attemptNumber) {
+async function selectRandomCourse(page, attemptNumber, logger: ILogger) {
   const courseSelect = page.locator('[data-test="course-select"]');
   if (await courseSelect.count() === 0) {
-    console.log('⚠️ [Relationships] Course select component not found.');
+    logger.log('⚠️ [Relationships] Course select component not found.');
     return false;
   }
 
@@ -4026,7 +4027,7 @@ async function selectRandomCourse(page, attemptNumber) {
   const letterIndex = Math.floor(Math.random() * letters.length);
   const currentLetter = letters[letterIndex];
 
-  console.log(`🔍 [Relationships] Searching courses with letter '${currentLetter}'...`);
+  logger.log(`🔍 [Relationships] Searching courses with letter '${currentLetter}'...`);
 
   try {
     // Click on the multiselect to open it
@@ -4047,16 +4048,16 @@ async function selectRandomCourse(page, attemptNumber) {
         // Select a random course from available options
         const randomIndex = Math.floor(Math.random() * Math.min(optionCount, 3)); // Use first 3 options
         await courseInput.first().press('Enter'); // Select first course
-        console.log(`   ✅ Selected course (${optionCount} options available)`);
+        logger.log(`   ✅ Selected course (${optionCount} options available)`);
         await page.waitForTimeout(1500); // Wait for course to load sections
         return true;
       } else {
-        console.log(`   ❌ No courses found with letter '${currentLetter}'`);
+        logger.log(`   ❌ No courses found with letter '${currentLetter}'`);
         return false;
       }
     }
   } catch (error) {
-    console.log(`   ❌ Error selecting course: ${error.message}`);
+    logger.log(`   ❌ Error selecting course: ${error.message}`);
     return false;
   }
 
@@ -4066,12 +4067,12 @@ async function selectRandomCourse(page, attemptNumber) {
 /**
  * Validate how many sections are available for the selected course
  */
-async function validateSectionCount(page) {
+async function validateSectionCount(page, logger: ILogger) {
   await page.waitForTimeout(1500); // Wait for sections to load
 
   const sectionSelect = page.locator('[data-test="section-select"]');
   if (await sectionSelect.count() === 0) {
-    console.log('⚠️ [Relationships] Section select not found');
+    logger.log('⚠️ [Relationships] Section select not found');
     return 0;
   }
 
@@ -4090,7 +4091,7 @@ async function validateSectionCount(page) {
 
     return sectionCount;
   } catch (error) {
-    console.log(`⚠️ [Relationships] Error validating sections: ${error.message}`);
+    logger.log(`⚠️ [Relationships] Error validating sections: ${error.message}`);
     return 0;
   }
 }
@@ -4098,12 +4099,12 @@ async function validateSectionCount(page) {
 /**
  * Add a single section (specified by position number)
  */
-async function addSingleSection(page, sectionNumber) {
-  console.log(`➕ [Relationships] Adding section #${sectionNumber}...`);
+async function addSingleSection(page, sectionNumber, logger: ILogger) {
+  logger.log(`➕ [Relationships] Adding section #${sectionNumber}...`);
 
   const sectionSelect = page.locator('[data-test="section-select"]');
   if (await sectionSelect.count() === 0) {
-    console.log('⚠️ [Relationships] Section select not found');
+    logger.log('⚠️ [Relationships] Section select not found');
     return false;
   }
 
@@ -4129,13 +4130,13 @@ async function addSingleSection(page, sectionNumber) {
       const tl = text.toLowerCase();
       const hasBanned = bannedFragments.some(f => tl.includes(f));
       if (hasBanned) {
-        console.log(`   ┣ ⏭️ Skipping section option ${idx + 1} due to CD suffix: "${text.trim()}"`);
+        logger.log(`   ┣ ⏭️ Skipping section option ${idx + 1} due to CD suffix: "${text.trim()}"`);
         continue;
       }
       try {
         await option.click();
         selectedOption = true;
-        console.log(`   ✅ Selected section option ${idx + 1}: "${text.trim()}"`);
+        logger.log(`   ✅ Selected section option ${idx + 1}: "${text.trim()}"`);
         break;
       } catch (_) {
         // Try next
@@ -4144,14 +4145,14 @@ async function addSingleSection(page, sectionNumber) {
 
     // Fallback to original keyboard navigation if none acceptable found
     if (!selectedOption) {
-      console.log('   ┣ ⚠️ No acceptable section option found by text; falling back to keyboard selection');
+      logger.log('   ┣ ⚠️ No acceptable section option found by text; falling back to keyboard selection');
       for (let i = 1; i < sectionNumber; i++) {
         await page.keyboard.press('ArrowDown');
         await page.waitForTimeout(200);
       }
       await page.keyboard.press('Enter');
       await page.waitForTimeout(500);
-      console.log(`   ✅ Section #${sectionNumber} selected (fallback)`);
+      logger.log(`   ✅ Section #${sectionNumber} selected (fallback)`);
     }
 
     // Click add section button
@@ -4159,14 +4160,14 @@ async function addSingleSection(page, sectionNumber) {
     if (await addSectionBtn.count() > 0) {
       await addSectionBtn.first().click();
       await page.waitForTimeout(500);
-      console.log(`   ✅ Section #${sectionNumber} added to relationship`);
+      logger.log(`   ✅ Section #${sectionNumber} added to relationship`);
       return true;
     } else {
-      console.log('⚠️ [Relationships] Add section button not found');
+      logger.log('⚠️ [Relationships] Add section button not found');
       return false;
     }
   } catch (error) {
-    console.log(`❌ [Relationships] Error adding section: ${error.message}`);
+    logger.log(`❌ [Relationships] Error adding section: ${error.message}`);
     return false;
   }
 }
@@ -4183,8 +4184,8 @@ async function countAddedSections(page) {
 /**
  * Clear the current course selection to try a different one
  */
-async function clearCourseSelection(page) {
-  console.log('🧹 [Relationships] Clearing course selection...');
+async function clearCourseSelection(page, logger: ILogger) {
+  logger.log('🧹 [Relationships] Clearing course selection...');
 
   const courseSelect = page.locator('[data-test="course-select"]');
   if (await courseSelect.count() > 0) {
@@ -4203,9 +4204,9 @@ async function clearCourseSelection(page) {
       await page.keyboard.press('Escape');
       await page.waitForTimeout(500);
 
-      console.log('   ✅ Course selection cleared');
+      logger.log('   ✅ Course selection cleared');
     } catch (error) {
-      console.log(`⚠️ [Relationships] Error clearing course selection: ${error.message}`);
+      logger.log(`⚠️ [Relationships] Error clearing course selection: ${error.message}`);
     }
   }
 }
@@ -4216,8 +4217,8 @@ async function clearCourseSelection(page) {
  * @param {Locator} modal - The modal locator
  * @returns {Object} - {isValid: boolean, reason: string}
  */
-async function validateRelationshipStatus(page, modal) {
-  console.log('🔍 [Relationships] Validating relationship status...');
+async function validateRelationshipStatus(page, modal, logger: ILogger) {
+  logger.log('🔍 [Relationships] Validating relationship status...');
 
   try {
     // Check for integration status text
@@ -4225,30 +4226,30 @@ async function validateRelationshipStatus(page, modal) {
 
     if (await statusElement.count() > 0) {
       const statusText = await statusElement.textContent();
-      console.log(`📊 [Relationships] Found status: "${statusText}"`);
+      logger.log(`📊 [Relationships] Found status: "${statusText}"`);
 
       if (statusText && statusText.toLowerCase().includes('error')) {
-        console.log('❌ [Relationships] Selected a relationship with error, trying a new one');
+        logger.log('❌ [Relationships] Selected a relationship with error, trying a new one');
         return {
           isValid: false,
           reason: `Relationship has error status: ${statusText}`
         };
       } else {
-        console.log('✅ [Relationships] Relationship status is valid');
+        logger.log('✅ [Relationships] Relationship status is valid');
         return {
           isValid: true,
           reason: 'No error status detected'
         };
       }
     } else {
-      console.log('ℹ️ [Relationships] No integration status found, assuming valid');
+      logger.log('ℹ️ [Relationships] No integration status found, assuming valid');
       return {
         isValid: true,
         reason: 'No status element found'
       };
     }
   } catch (error) {
-    console.log(`⚠️ [Relationships] Error validating status: ${error.message}`);
+    logger.log(`⚠️ [Relationships] Error validating status: ${error.message}`);
     return {
       isValid: true,
       reason: 'Error during validation, assuming valid'
@@ -4262,13 +4263,13 @@ async function validateRelationshipStatus(page, modal) {
  * @param {Locator} tbody - The table body locator
  * @returns {Object} - {success: boolean, message: string}
  */
-async function selectNextValidRelationship(page, tbody) {
-  console.log('🔍 [Relationships] Looking for next valid relationship...');
+async function selectNextValidRelationship(page, tbody, logger: ILogger) {
+  logger.log('🔍 [Relationships] Looking for next valid relationship...');
 
   try {
     const relationshipRows = tbody.locator('tr[tabindex="0"]');
     const totalRows = await relationshipRows.count();
-    console.log(`📊 [Relationships] Found ${totalRows} relationship row(s) in table`);
+    logger.log(`📊 [Relationships] Found ${totalRows} relationship row(s) in table`);
 
     if (totalRows <= 1) {
       return {
@@ -4280,7 +4281,7 @@ async function selectNextValidRelationship(page, tbody) {
     // Try clicking the second relationship (index 1)
     const secondRelationshipRow = relationshipRows.nth(1);
     if (await secondRelationshipRow.count() > 0) {
-      console.log('📝 [Relationships] Clicking on next relationship to edit...');
+      logger.log('📝 [Relationships] Clicking on next relationship to edit...');
       await secondRelationshipRow.click();
       await page.waitForTimeout(2000); // Wait for modal to load
 
@@ -4295,7 +4296,7 @@ async function selectNextValidRelationship(page, tbody) {
       };
     }
   } catch (error) {
-    console.log(`❌ [Relationships] Error selecting next relationship: ${error.message}`);
+    logger.log(`❌ [Relationships] Error selecting next relationship: ${error.message}`);
     return {
       success: false,
       message: `Error: ${error.message}`
@@ -4303,22 +4304,22 @@ async function selectNextValidRelationship(page, tbody) {
   }
 }
 
-async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, isSecondRun = false, browser = null) {
-  console.log(`🔗 [Relationships] Starting ${action} process...`);
+async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, isSecondRun = false, browser = null, logger: ILogger) {
+  logger.log(`🔗 [Relationships] Starting ${action} process...`);
 
   // Navigate to relationships page
   const relationshipsLink = page.locator('li[data-test="routeToRelationships"]');
   if (await relationshipsLink.count() > 0 && await relationshipsLink.first().isVisible()) {
-    console.log('🔗 [Relationships] Clicking on Relationships navigation link...');
+    logger.log('🔗 [Relationships] Clicking on Relationships navigation link...');
     await relationshipsLink.first().click();
-    console.log('🔗 [Relationships] Loading Relationships page...');
+    logger.log('🔗 [Relationships] Loading Relationships page...');
   } else {
-    console.log('❌ [Relationships] Relationships navigation link not found or not visible.');
+    logger.log('❌ [Relationships] Relationships navigation link not found or not visible.');
     return false;
   }
 
   // Check for existing relationships - wait for table to load instead of using timeouts
-  console.log('🔗 [Relationships] Waiting for relationships table to load...');
+  logger.log('🔗 [Relationships] Waiting for relationships table to load...');
 
   try {
     // Wait for the relationships table to be present and visible
@@ -4326,9 +4327,9 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
       state: 'visible',
       timeout: 30000 // 30 second timeout as fallback
     });
-    console.log('🔗 [Relationships] Relationships table loaded successfully.');
+    logger.log('🔗 [Relationships] Relationships table loaded successfully.');
   } catch (timeoutErr) {
-    console.log('⚠️ [Relationships] Relationships table did not load within timeout. Proceeding anyway...');
+    logger.log('⚠️ [Relationships] Relationships table did not load within timeout. Proceeding anyway...');
   }
 
   // Check for existing relationships table
@@ -4340,30 +4341,30 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
     // Handle action-specific logic
     if (action === 'editRelationships') {
       if (await noRelationshipsText.count() > 0) {
-        console.log('ℹ️ [Edit Relationships] No existing relationships found to edit.');
+        logger.log('ℹ️ [Edit Relationships] No existing relationships found to edit.');
         return false;
       } else {
-        console.log('ℹ️ [Edit Relationships] Existing relationships found, editing first one...');
+        logger.log('ℹ️ [Edit Relationships] Existing relationships found, editing first one...');
         // Force edit mode by setting isSecondRun = false
         isSecondRun = false;
       }
     } else if (action === 'createRelationships') {
-      console.log('ℹ️ [Create Relationships] Proceeding to create new relationship...');
+      logger.log('ℹ️ [Create Relationships] Proceeding to create new relationship...');
       // Force create mode by setting isSecondRun = true (skips edit logic)
       isSecondRun = true;
     } else {
       // Legacy support for old 'relationships' action (backwards compatibility)
-      console.log('🔗 [Relationships] Using legacy combined edit+create flow...');
+      logger.log('🔗 [Relationships] Using legacy combined edit+create flow...');
       if (await noRelationshipsText.count() > 0) {
-        console.log('ℹ️ [Relationships] No existing relationships found, proceeding to create new one.');
+        logger.log('ℹ️ [Relationships] No existing relationships found, proceeding to create new one.');
       } else if (!isSecondRun) {
-        console.log('ℹ️ [Relationships] Existing relationships found, editing first one...');
+        logger.log('ℹ️ [Relationships] Existing relationships found, editing first one...');
       } else {
-        console.log('ℹ️ [Relationships] Second run - skipping edit of existing relationships, proceeding to create new one.');
+        logger.log('ℹ️ [Relationships] Second run - skipping edit of existing relationships, proceeding to create new one.');
       }
     }
   } else {
-    console.log('⚠️ [Relationships] Relationships table not found, proceeding anyway.');
+    logger.log('⚠️ [Relationships] Relationships table not found, proceeding anyway.');
   }
 
   // Continue with the existing relationship logic based on isSecondRun flag
@@ -4373,56 +4374,56 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
     const noRelationshipsText = tbody.locator('[aria-label="There aren\'t any Relationships in this view right now."]');
 
     if (await noRelationshipsText.count() > 0) {
-      console.log('ℹ️ [Relationships] No existing relationships found, proceeding to create new one.');
+      logger.log('ℹ️ [Relationships] No existing relationships found, proceeding to create new one.');
     } else if (!isSecondRun) {
-      console.log('ℹ️ [Relationships] Existing relationships found, editing first one...');
+      logger.log('ℹ️ [Relationships] Existing relationships found, editing first one...');
 
       // Click on the first relationship row
       const firstRelationshipRow = tbody.locator('tr[tabindex="0"]').first();
       if (await firstRelationshipRow.count() > 0) {
-        console.log('📝 [Relationships] Clicking on first relationship to edit...');
+        logger.log('📝 [Relationships] Clicking on first relationship to edit...');
         await firstRelationshipRow.first().click();
         await page.waitForTimeout(2000); // Wait for edit modal to load
 
         // Wait for edit relationship modal
         const editModal = page.locator('.modal-dialog');
         await editModal.waitFor({ state: 'visible', timeout: 10000 });
-        console.log('   ┗ Edit relationship modal opened.');
+        logger.log('   ┗ Edit relationship modal opened.');
 
         // Validate if relationship has error status
-        const errorValidationResult = await validateRelationshipStatus(page, editModal);
+        const errorValidationResult = await validateRelationshipStatus(page, editModal, logger);
         if (!errorValidationResult.isValid) {
-          console.log('🔄 [Relationships] Invalid relationship detected, trying next one...');
+          logger.log('🔄 [Relationships] Invalid relationship detected, trying next one...');
 
           // Close the current modal
           const closeModalBtn = page.locator('button[aria-label="Close modal"]');
           if (await closeModalBtn.count() > 0) {
             await closeModalBtn.click();
             await page.waitForTimeout(1000);
-            console.log('   ┗ Closed modal with error relationship.');
+            logger.log('   ┗ Closed modal with error relationship.');
           }
 
           // Try to find and click the next relationship
-          const nextRelationshipResult = await selectNextValidRelationship(page, tbody);
+          const nextRelationshipResult = await selectNextValidRelationship(page, tbody, logger);
           if (!nextRelationshipResult.success) {
-            console.log('❌ [Relationships] No valid relationships found for editing.');
+            logger.log('❌ [Relationships] No valid relationships found for editing.');
             return false;
           }
 
           // Wait for the new modal to open
           await editModal.waitFor({ state: 'visible', timeout: 10000 });
-          console.log('   ┗ New edit relationship modal opened.');
+          logger.log('   ┗ New edit relationship modal opened.');
         }
 
         // Take full-height screenshot before editing
-        console.log('📸 [Relationships] Taking full-height screenshot before editing...');
+        logger.log('📸 [Relationships] Taking full-height screenshot before editing...');
         const screenshotBefore = path.join(outputDir, `${action}-update-modal-before.png`);
         await captureRelationshipModalFull(page, screenshotBefore);
-        console.log(`   ┗ Screenshot saved to ${screenshotBefore}`);
+        logger.log(`   ┗ Screenshot saved to ${screenshotBefore}`);
 
         // Capture original values
-        console.log('📝 [Relationships] Capturing original relationship values...');
-        const originalValues = {};
+        logger.log('📝 [Relationships] Capturing original relationship values...');
+        const originalValues = {} as unknown as any;
 
         const relationshipNameInput = page.locator('input[placeholder="Set relationship name"]');
         if (await relationshipNameInput.count() > 0) {
@@ -4439,38 +4440,38 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
           originalValues.notes = await notesTextarea.first().inputValue();
         }
 
-        console.log('   ┗ Original values captured for comparison.');
+        logger.log('   ┗ Original values captured for comparison.');
 
         // Edit relationship name
         if (await relationshipNameInput.count() > 0) {
-          console.log('✏️ [Relationships] Editing relationship name...');
+          logger.log('✏️ [Relationships] Editing relationship name...');
           await relationshipNameInput.first().fill(originalValues.relationshipName + '-CDtest');
-          console.log('   ┗ Relationship name updated.');
+          logger.log('   ┗ Relationship name updated.');
         } else {
-          console.log('⚠️ [Relationships] Relationship name input not found.');
+          logger.log('⚠️ [Relationships] Relationship name input not found.');
         }
 
         // Edit combined max enrollment
         if (await maxEnrollmentInput.count() > 0) {
-          console.log('🔢 [Relationships] Updating combined max enrollment...');
+          logger.log('🔢 [Relationships] Updating combined max enrollment...');
           await maxEnrollmentInput.first().fill('60');
-          console.log('   ┗ Combined max enrollment updated to 60.');
+          logger.log('   ┗ Combined max enrollment updated to 60.');
         } else {
-          console.log('⚠️ [Relationships] Combined max enrollment input not found.');
+          logger.log('⚠️ [Relationships] Combined max enrollment input not found.');
         }
 
         // Edit relationship notes
         if (await notesTextarea.count() > 0) {
-          console.log('📝 [Relationships] Editing relationship notes...');
+          logger.log('📝 [Relationships] Editing relationship notes...');
           await notesTextarea.first().fill(originalValues.notes + '-CDtest');
-          console.log('   ┗ Relationship notes updated.');
+          logger.log('   ┗ Relationship notes updated.');
         } else {
-          console.log('⚠️ [Relationships] Relationship notes textarea not found.');
+          logger.log('⚠️ [Relationships] Relationship notes textarea not found.');
         }
 
         // Capture new values after editing
-        console.log('📝 [Relationships] Capturing new relationship values...');
-        const newValues = {};
+        logger.log('📝 [Relationships] Capturing new relationship values...');
+        const newValues = {} as unknown as any;
 
         if (await relationshipNameInput.count() > 0) {
           newValues.relationshipName = await relationshipNameInput.first().inputValue();
@@ -4484,10 +4485,10 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
           newValues.notes = await notesTextarea.first().inputValue();
         }
 
-        console.log('   ┗ New values captured for comparison.');
+        logger.log('   ┗ New values captured for comparison.');
 
         // Compare and create diff file (markdown table)
-        console.log('📊 [Relationships] Creating relationship field differences...');
+        logger.log('📊 [Relationships] Creating relationship field differences...');
         const tableRows = [];
         for (const key of Object.keys(originalValues)) {
           const beforeVal = originalValues[key] ?? '';
@@ -4500,33 +4501,33 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
         if (tableRows.length > 0) {
           const header = '| Field | Original | New | Status | Comments |\n| --- | --- | --- | --- | --- |';
           const diffText = `${header}\n${tableRows.join('\n')}`;
-          console.log('\n=== Relationship Field Differences (Table) ===\n' + diffText);
+          logger.log('\n=== Relationship Field Differences (Table) ===\n' + diffText);
           const now = new Date();
           const pad = n => n.toString().padStart(2, '0');
           const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
           const diffFileName = `${schoolId}-update-field-differences-${dateStr}.txt`;
           const diffFilePath = path.join(outputDir, diffFileName);
           fs.writeFileSync(diffFilePath, diffText, 'utf8');
-          console.log(`\nDifferences saved to: ${diffFilePath}`);
+          logger.log(`\nDifferences saved to: ${diffFilePath}`);
         } else {
-          console.log('\nNo relationship field differences detected.');
+          logger.log('\nNo relationship field differences detected.');
         }
 
         // Add course and section to the relationship (reusing create logic)
-        console.log('🔗 [Relationships] Adding course and section to edited relationship...');
-        await addCourseAndSections(page);
-        console.log('   ┗ Course and section addition completed for edit.');
+        logger.log('🔗 [Relationships] Adding course and section to edited relationship...');
+        await addCourseAndSections(page, undefined, logger);
+        logger.log('   ┗ Course and section addition completed for edit.');
 
         // Take full-height screenshot after editing and adding course/section
-        console.log('📸 [Relationships] Taking full-height screenshot after editing...');
+        logger.log('📸 [Relationships] Taking full-height screenshot after editing...');
         const screenshotAfter = path.join(outputDir, `${action}-update-modal-after.png`);
         await captureRelationshipModalFull(page, screenshotAfter);
-        console.log(`   ┗ Screenshot saved to ${screenshotAfter}`);
+        logger.log(`   ┗ Screenshot saved to ${screenshotAfter}`);
 
         // Click save relationship button
         const saveRelationshipBtn = page.locator('[data-test="save-relationship"]');
         if (await saveRelationshipBtn.count() > 0 && await saveRelationshipBtn.first().isVisible()) {
-          console.log('💾 [Relationships] Saving edited relationship...');
+          logger.log('💾 [Relationships] Saving edited relationship...');
           await saveRelationshipBtn.first().click();
           await page.waitForTimeout(5000); // Wait 5 seconds for potential conflict modal to appear
 
@@ -4535,75 +4536,75 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
           const conflictModalTitle = page.locator('h3.heading', { hasText: 'Relationship Conflicts' });
 
           if (await conflictModalTitle.count() > 0 && await conflictModalTitle.first().isVisible()) {
-            console.log('⚠️ [Relationships] Conflict modal detected during edit! Taking screenshot...');
+            logger.log('⚠️ [Relationships] Conflict modal detected during edit! Taking screenshot...');
 
             // Take full screenshot of the conflict modal
             const conflictScreenshotPath = path.join(outputDir, `${action}-conflictModal.png`);
             await captureRelationshipModalFull(page, conflictScreenshotPath, true);
-            console.log(`   ┗ Conflict modal screenshot saved to ${conflictScreenshotPath}`);
+            logger.log(`   ┗ Conflict modal screenshot saved to ${conflictScreenshotPath}`);
 
             // Click "Save Anyway" button if available
             const saveAnywayBtn = page.locator('button[data-test="save_anyway"]');
             if (await saveAnywayBtn.count() > 0 && await saveAnywayBtn.first().isVisible()) {
-              console.log('   ┗ Clicking "Save Anyway" button...');
+              logger.log('   ┗ Clicking "Save Anyway" button...');
               await saveAnywayBtn.first().click();
               await page.waitForTimeout(1000); // Wait for modal to process
-              console.log('   ┗ Relationship saved despite conflicts.');
+              logger.log('   ┗ Relationship saved despite conflicts.');
             } else {
-              console.log('   ┗ No "Save Anyway" button found in conflict modal.');
+              logger.log('   ┗ No "Save Anyway" button found in conflict modal.');
             }
           } else {
-            console.log('   ┗ No conflict modal detected, waiting for relationship modal to close...');
+            logger.log('   ┗ No conflict modal detected, waiting for relationship modal to close...');
 
             // Wait for the edit relationship modal to close
             try {
               await page.waitForSelector('input[placeholder="Set relationship name"]', { state: 'detached', timeout: 10000 });
-              console.log('   ┗ Edit relationship modal closed successfully.');
+              logger.log('   ┗ Edit relationship modal closed successfully.');
             } catch (timeoutErr) {
-              console.log('⚠️ [Relationships] Edit modal did not close within timeout. Checking if still visible...');
+              logger.log('⚠️ [Relationships] Edit modal did not close within timeout. Checking if still visible...');
 
               // Check if edit modal is still visible by looking for the relationship name input
               const editModalStillVisible = await page.locator('input[placeholder="Set relationship name"]').count() > 0;
               if (editModalStillVisible) {
-                console.log('   ┗ Edit modal is still visible. Trying to close manually...');
+                logger.log('   ┗ Edit modal is still visible. Trying to close manually...');
 
                 // Try clicking outside the modal
                 try {
                   const body = page.locator('body');
                   await body.click({ position: { x: 10, y: 10 } });
                   await page.waitForTimeout(500);
-                  console.log('   ┗ Attempted to close modal by clicking outside.');
+                  logger.log('   ┗ Attempted to close modal by clicking outside.');
                 } catch (clickErr) {
-                  console.log(`   ┗ Error clicking outside modal: ${clickErr.message}`);
+                  logger.log(`   ┗ Error clicking outside modal: ${clickErr.message}`);
                 }
 
                 // Try escape key as fallback
                 try {
                   await page.keyboard.press('Escape');
                   await page.waitForTimeout(500);
-                  console.log('   ┗ Attempted to close modal with escape key.');
+                  logger.log('   ┗ Attempted to close modal with escape key.');
                 } catch (escapeErr) {
-                  console.log(`   ┗ Error using escape key: ${escapeErr.message}`);
+                  logger.log(`   ┗ Error using escape key: ${escapeErr.message}`);
                 }
 
                 // Final check if edit modal is still there
                 const finalModalCheck = await page.locator('input[placeholder="Set relationship name"]').count() > 0;
                 if (finalModalCheck) {
-                  console.log('⚠️ [Relationships] Edit modal still visible after fallback attempts. Proceeding anyway...');
+                  logger.log('⚠️ [Relationships] Edit modal still visible after fallback attempts. Proceeding anyway...');
                 } else {
-                  console.log('   ┗ Edit modal closed via fallback methods.');
+                  logger.log('   ┗ Edit modal closed via fallback methods.');
                 }
               } else {
-                console.log('   ┗ Edit modal is no longer visible.');
+                logger.log('   ┗ Edit modal is no longer visible.');
               }
             }
           }
 
           // Additional wait to ensure everything is settled
           await page.waitForTimeout(2000);
-          console.log('   ┗ Edit relationship save process completed.');
+          logger.log('   ┗ Edit relationship save process completed.');
         } else {
-          console.log('❌ [Relationships] Save relationship button not found or not visible.');
+          logger.log('❌ [Relationships] Save relationship button not found or not visible.');
 
           // Offer user takeover for missing save button
           if (browser && schoolId) {
@@ -4611,9 +4612,9 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
             if (userResponse === 'yes') {
               const takeoverResult = await offerUserTakeover(page, browser, outputDir, 'relationship-save', schoolId, action, 'Save relationship button not found or not visible', null, true);
               if (takeoverResult.success) {
-                console.log('✅ User intervention successful - relationship saved manually');
+                logger.log('✅ User intervention successful - relationship saved manually');
                 if (takeoverResult.sectionChanged) {
-                  console.log('ℹ️ Section change detected, but relationship operations continue normally');
+                  logger.log('ℹ️ Section change detected, but relationship operations continue normally');
                 }
                 return 'edit_completed';
               }
@@ -4624,62 +4625,62 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
         // If this is the first run and we successfully edited a relationship, 
         // start the merge report polling and then run the flow again to create a new relationship
         if (!isSecondRun) {
-          console.log('🔄 [Relationships] First run completed (edit). Starting second run to create new relationship...');
+          logger.log('🔄 [Relationships] First run completed (edit). Starting second run to create new relationship...');
           return 'edit_completed'; // Special return value to indicate edit was completed
         } else {
           return true; // Exit early since we edited an existing relationship on second run
         }
       } else {
-        console.log('⚠️ [Relationships] No relationship rows found to edit.');
+        logger.log('⚠️ [Relationships] No relationship rows found to edit.');
       }
     } else {
-      console.log('ℹ️ [Relationships] Second run - skipping edit of existing relationships, proceeding to create new one.');
+      logger.log('ℹ️ [Relationships] Second run - skipping edit of existing relationships, proceeding to create new one.');
     }
   } else {
-    console.log('⚠️ [Relationships] Relationships table not found, proceeding anyway.');
+    logger.log('⚠️ [Relationships] Relationships table not found, proceeding anyway.');
   }
 
   // Click Add Relationship button
   await page.waitForTimeout(2000); // Wait for previous page to load
   const addRelationshipBtn = page.locator('button.btn.btn-primary', { hasText: 'Add Relationship' });
   if (await addRelationshipBtn.count() > 0 && await addRelationshipBtn.first().isVisible()) {
-    console.log('➕ [Relationships] Clicking Add Relationship button...');
+    logger.log('➕ [Relationships] Clicking Add Relationship button...');
     await addRelationshipBtn.first().click();
     await page.waitForTimeout(2000); // Wait for modal to load
   } else {
-    console.log('❌ [Relationships] Add Relationship button not found or not visible.');
+    logger.log('❌ [Relationships] Add Relationship button not found or not visible.');
     return false;
   }
 
   // Wait for modal dialog
   const modalDialog = page.locator('.modal-dialog');
   await modalDialog.waitFor({ state: 'visible', timeout: 10000 });
-  console.log('   ┗ Relationship modal opened.');
+  logger.log('   ┗ Relationship modal opened.');
 
   // Fill relationship name
   const relationshipNameInput = page.locator('input[placeholder="Set relationship name"]');
   if (await relationshipNameInput.count() > 0) {
-    console.log('✏️ [Relationships] Filling relationship name...');
+    logger.log('✏️ [Relationships] Filling relationship name...');
     await relationshipNameInput.first().fill('-CDtest');
-    console.log('   ┗ Relationship name filled.');
+    logger.log('   ┗ Relationship name filled.');
   } else {
-    console.log('⚠️ [Relationships] Relationship name input not found.');
+    logger.log('⚠️ [Relationships] Relationship name input not found.');
   }
 
   // Fill combined max enrollment
   const maxEnrollmentInput = page.locator('input[placeholder="Set combined max enrollment"]');
   if (await maxEnrollmentInput.count() > 0) {
-    console.log('🔢 [Relationships] Filling combined max enrollment...');
+    logger.log('🔢 [Relationships] Filling combined max enrollment...');
     await maxEnrollmentInput.first().fill('50');
-    console.log('   ┗ Combined max enrollment filled.');
+    logger.log('   ┗ Combined max enrollment filled.');
   } else {
-    console.log('⚠️ [Relationships] Combined max enrollment input not found.');
+    logger.log('⚠️ [Relationships] Combined max enrollment input not found.');
   }
 
   // Select relationship type
   const relationshipSelect = page.locator('.multiselect', { hasText: 'Select relationship' });
   if (await relationshipSelect.count() > 0) {
-    console.log('🔽 [Relationships] Opening relationship type dropdown...');
+    logger.log('🔽 [Relationships] Opening relationship type dropdown...');
     await relationshipSelect.first().click();
     await page.waitForTimeout(500);
 
@@ -4687,42 +4688,42 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
     const sameTimeOption = page.locator('.multiselect__content-wrapper li', { hasText: 'Same Time Same Day Same Room' });
     if (await sameTimeOption.count() > 0) {
       await sameTimeOption.first().click();
-      console.log('   ┗ Relationship type selected: Same Time Same Day Same Room');
+      logger.log('   ┗ Relationship type selected: Same Time Same Day Same Room');
     } else {
-      console.log('⚠️ [Relationships] "Same Time Same Day Same Room" option not found, selecting first available option.');
+      logger.log('⚠️ [Relationships] "Same Time Same Day Same Room" option not found, selecting first available option.');
       const firstOption = page.locator('.multiselect__content-wrapper li').first();
       if (await firstOption.count() > 0) {
         await firstOption.first().click();
-        console.log('   ┗ First available relationship type selected.');
+        logger.log('   ┗ First available relationship type selected.');
       }
     }
   } else {
-    console.log('⚠️ [Relationships] Relationship type dropdown not found.');
+    logger.log('⚠️ [Relationships] Relationship type dropdown not found.');
   }
 
   // Fill relationship notes
   const notesTextarea = page.locator('textarea[placeholder="Set relationship notes"]');
   if (await notesTextarea.count() > 0) {
-    console.log('📝 [Relationships] Filling relationship notes...');
+    logger.log('📝 [Relationships] Filling relationship notes...');
     await notesTextarea.first().fill('-CDtest');
-    console.log('   ┗ Relationship notes filled.');
+    logger.log('   ┗ Relationship notes filled.');
   } else {
-    console.log('⚠️ [Relationships] Relationship notes textarea not found.');
+    logger.log('⚠️ [Relationships] Relationship notes textarea not found.');
   }
 
   // Add course and sections to relationship (with second section for create mode)
-  await addCourseAndSections(page, true);
+  await addCourseAndSections(page, true, logger);
 
   // Take screenshot of the modal
-  console.log('📸 [Relationships] Taking screenshot of relationship modal...');
+  logger.log('📸 [Relationships] Taking screenshot of relationship modal...');
   const screenshotPath = path.join(outputDir, `${action}-create-modal.png`);
   await modalDialog.screenshot({ path: screenshotPath });
-  console.log(`   ┗ Screenshot saved to ${screenshotPath}`);
+  logger.log(`   ┗ Screenshot saved to ${screenshotPath}`);
 
   // Click save relationship button
   const saveRelationshipBtn = page.locator('[data-test="save-relationship"]');
   if (await saveRelationshipBtn.count() > 0 && await saveRelationshipBtn.first().isVisible()) {
-    console.log('💾 [Relationships] Saving relationship...');
+    logger.log('💾 [Relationships] Saving relationship...');
     await saveRelationshipBtn.first().click();
     await page.waitForTimeout(5000); // Wait for potential conflict modal to appear
 
@@ -4731,78 +4732,78 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
     const conflictModalTitle = page.locator('h3.heading', { hasText: 'Relationship Conflicts' });
 
     if (await conflictModalTitle.count() > 0 && await conflictModalTitle.first().isVisible()) {
-      console.log('⚠️ [Relationships] Conflict modal detected! Taking screenshot...');
+      logger.log('⚠️ [Relationships] Conflict modal detected! Taking screenshot...');
 
       // Take screenshot of the conflict modal
       const conflictScreenshotPath = path.join(outputDir, `${action}-conflictModal.png`);
       await conflictModal.first().screenshot({ path: conflictScreenshotPath });
-      console.log(`   ┗ Conflict modal screenshot saved to ${conflictScreenshotPath}`);
+      logger.log(`   ┗ Conflict modal screenshot saved to ${conflictScreenshotPath}`);
 
       // Click "Save Anyway" button if available
       const saveAnywayBtn = page.locator('button[data-test="save_anyway"]');
       if (await saveAnywayBtn.count() > 0 && await saveAnywayBtn.first().isVisible()) {
-        console.log('   ┗ Clicking "Save Anyway" button...');
+        logger.log('   ┗ Clicking "Save Anyway" button...');
         await saveAnywayBtn.first().click();
         await page.waitForTimeout(1000); // Wait for modal to process
-        console.log('   ┗ Relationship saved despite conflicts.');
+        logger.log('   ┗ Relationship saved despite conflicts.');
       } else {
-        console.log('   ┗ No "Save Anyway" button found in conflict modal.');
+        logger.log('   ┗ No "Save Anyway" button found in conflict modal.');
       }
     } else {
-      console.log('   ┗ No conflict modal detected, relationship saved normally.');
+      logger.log('   ┗ No conflict modal detected, relationship saved normally.');
     }
 
     // Wait for the relationship modal to close before finalizing
-    console.log('⏳ [Relationships] Waiting for relationship modal to close...');
+    logger.log('⏳ [Relationships] Waiting for relationship modal to close...');
     try {
       // Wait for the modal dialog to disappear (timeout after 10 seconds)
       await page.waitForSelector('.modal-dialog', { state: 'detached', timeout: 10000 });
-      console.log('   ┗ Relationship modal closed successfully.');
+      logger.log('   ┗ Relationship modal closed successfully.');
     } catch (timeoutErr) {
-      console.log('⚠️ [Relationships] Modal did not close within timeout. Checking if still visible...');
+      logger.log('⚠️ [Relationships] Modal did not close within timeout. Checking if still visible...');
 
       // Check if modal is still visible
       const modalStillVisible = await page.locator('.modal-dialog').count() > 0;
       if (modalStillVisible) {
-        console.log('   ┗ Modal is still visible. Trying to close manually...');
+        logger.log('   ┗ Modal is still visible. Trying to close manually...');
 
         // Try clicking outside the modal
         try {
           const body = page.locator('body');
           await body.click({ position: { x: 10, y: 10 } });
           await page.waitForTimeout(500);
-          console.log('   ┗ Attempted to close modal by clicking outside.');
+          logger.log('   ┗ Attempted to close modal by clicking outside.');
         } catch (clickErr) {
-          console.log(`   ┗ Error clicking outside modal: ${clickErr.message}`);
+          logger.log(`   ┗ Error clicking outside modal: ${clickErr.message}`);
         }
 
         // Try escape key as fallback
         try {
           await page.keyboard.press('Escape');
           await page.waitForTimeout(500);
-          console.log('   ┗ Attempted to close modal with escape key.');
+          logger.log('   ┗ Attempted to close modal with escape key.');
         } catch (escapeErr) {
-          console.log(`   ┗ Error using escape key: ${escapeErr.message}`);
+          logger.log(`   ┗ Error using escape key: ${escapeErr.message}`);
         }
 
         // Final check if modal is still there
         const finalModalCheck = await page.locator('.modal-dialog').count() > 0;
         if (finalModalCheck) {
-          console.log('⚠️ [Relationships] Modal still visible after fallback attempts. Proceeding anyway...');
+          logger.log('⚠️ [Relationships] Modal still visible after fallback attempts. Proceeding anyway...');
         } else {
-          console.log('   ┗ Modal closed via fallback methods.');
+          logger.log('   ┗ Modal closed via fallback methods.');
         }
       } else {
-        console.log('   ┗ Modal is no longer visible.');
+        logger.log('   ┗ Modal is no longer visible.');
       }
     }
 
     // Additional wait to ensure everything is settled
     await page.waitForTimeout(2000);
-    console.log('   ┗ Relationship save process completed.');
+    logger.log('   ┗ Relationship save process completed.');
     return true;
   } else {
-    console.log('❌ [Relationships] Save relationship button not found or not visible.');
+    logger.log('❌ [Relationships] Save relationship button not found or not visible.');
 
     // Offer user takeover for missing save button
     if (browser && schoolId) {
@@ -4810,9 +4811,9 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
       if (userResponse === 'yes') {
         const takeoverResult = await offerUserTakeover(page, browser, outputDir, 'relationship-save', schoolId, action, 'Save relationship button not found or not visible', null, true);
         if (takeoverResult.success) {
-          console.log('✅ User intervention successful - relationship saved manually');
+          logger.log('✅ User intervention successful - relationship saved manually');
           if (takeoverResult.sectionChanged) {
-            console.log('ℹ️ Section change detected, but relationship operations continue normally');
+            logger.log('ℹ️ Section change detected, but relationship operations continue normally');
           }
           return true;
         }
@@ -4823,15 +4824,16 @@ async function relationshipsFill(baseDomain, page, outputDir, action, schoolId, 
   }
 }
 
-module.exports = {
+export {
+  bannerEthosScheduleType,
+  checkForApiError,
+  ensureRunLogger,
   fillBaselineTemplate,
-  saveSection,
-  validateAndResetMeetingPatterns,
-  validateAndResetProfessors,
+  meetAndProfDetails,
   readSectionValues,
   relationshipsFill,
-  bannerEthosScheduleType,
-  meetAndProfDetails,
-  ensureRunLogger,
-  checkForApiError
+  saveSection,
+  validateAndResetMeetingPatterns,
+  validateAndResetProfessors
 };
+

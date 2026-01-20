@@ -1,6 +1,7 @@
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import type { ILogger } from './services/interfaces/ILogger';
 
 // Load credentials from creds.json
 let creds = { email: '', password: '', notion_api_key: '' };
@@ -18,7 +19,7 @@ try {
  * @param {string} env - Environment ('prd' or 'stg')
  * @returns {Promise<void>}
  */
-async function fetchSectionTemplate(token, schoolId, env, baseUrl) {
+async function fetchSectionTemplate(token, schoolId, env, baseUrl, logger: ILogger) {
   const url = `${baseUrl}/api/v2/${schoolId}/general/sectionTemplate`;
 
   const headers = {
@@ -32,18 +33,18 @@ async function fetchSectionTemplate(token, schoolId, env, baseUrl) {
   };
 
   try {
-    console.log(`📡 Fetching section template for school: ${schoolId}...`);
-    console.log(`🌐 API URL: ${url}`);
+    logger.log(`📡 Fetching section template for school: ${schoolId}...`);
+    logger.log(`🌐 API URL: ${url}`);
 
     const response = await axios.get(url, { headers });
 
     if (response.data) {
-      console.log('✅ Section template received successfully');
+      logger.log('✅ Section template received successfully');
 
       // Create Resources directory if it doesn't exist
       const resourcesDir = path.join(__dirname, 'Resources');
       if (!fs.existsSync(resourcesDir)) {
-        console.log('📁 Creating Resources directory...');
+        logger.log('📁 Creating Resources directory...');
         fs.mkdirSync(resourcesDir, { recursive: true });
       }
 
@@ -54,19 +55,19 @@ async function fetchSectionTemplate(token, schoolId, env, baseUrl) {
       const filename = `${schoolId}-sectionTemplate-${dateStr}.json`;
       const filepath = path.join(resourcesDir, filename);
 
-      console.log(`💾 Saving template to: ${filepath}`);
+      logger.log(`💾 Saving template to: ${filepath}`);
       fs.writeFileSync(filepath, JSON.stringify(response.data, null, 2));
 
-      console.log(`✅ Section template saved as: ${filename}`);
+      logger.log(`✅ Section template saved as: ${filename}`);
       return response.data;
     } else {
       throw new Error('No data received in response');
     }
   } catch (error) {
-    console.error('❌ Failed to fetch section template:', error.message);
+    logger.error('❌ Failed to fetch section template:', error.message);
     if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
+      logger.error('Response status:', error.response.status);
+      logger.error('Response data:', error.response.data);
     }
     throw error;
   }
@@ -79,7 +80,7 @@ async function fetchSectionTemplate(token, schoolId, env, baseUrl) {
  * @param {string} env - Environment ('prd' or 'stg')
  * @returns {Promise<void>}
  */
-async function fetchCourseTemplate(token, schoolId, env, baseUrl) {
+async function fetchCourseTemplate(token, schoolId, env, baseUrl, logger: ILogger) {
   const url = `${baseUrl}/api/v1/${schoolId}/general/courseTemplate`;
 
   const headers = {
@@ -93,18 +94,18 @@ async function fetchCourseTemplate(token, schoolId, env, baseUrl) {
   };
 
   try {
-    console.log(`📡 Fetching course template for school: ${schoolId}...`);
-    console.log(`🌐 API URL: ${url}`);
+    logger.log(`📡 Fetching course template for school: ${schoolId}...`);
+    logger.log(`🌐 API URL: ${url}`);
 
     const response = await axios.get(url, { headers });
 
     if (response.data) {
-      console.log('✅ Course template received successfully');
+      logger.log('✅ Course template received successfully');
 
       // Create Resources directory if it doesn't exist
       const resourcesDir = path.join(__dirname, 'Resources');
       if (!fs.existsSync(resourcesDir)) {
-        console.log('📁 Creating Resources directory...');
+        logger.log('📁 Creating Resources directory...');
         fs.mkdirSync(resourcesDir, { recursive: true });
       }
 
@@ -115,19 +116,19 @@ async function fetchCourseTemplate(token, schoolId, env, baseUrl) {
       const filename = `${schoolId}-courseTemplate-${dateStr}.json`;
       const filepath = path.join(resourcesDir, filename);
 
-      console.log(`💾 Saving template to: ${filepath}`);
+      logger.log(`💾 Saving template to: ${filepath}`);
       fs.writeFileSync(filepath, JSON.stringify(response.data, null, 2));
 
-      console.log(`✅ Course template saved as: ${filename}`);
+      logger.log(`✅ Course template saved as: ${filename}`);
       return response.data;
     } else {
       throw new Error('No data received in response');
     }
   } catch (error) {
-    console.error('❌ Failed to fetch course template:', error.message);
+    logger.error('❌ Failed to fetch course template:', error.message);
     if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
+      logger.error('Response status:', error.response.status);
+      logger.error('Response data:', error.response.data);
     }
     throw error;
   }
@@ -140,7 +141,7 @@ async function fetchCourseTemplate(token, schoolId, env, baseUrl) {
  * @param {string} env - Environment ('prd' or 'stg')
  * @returns {Promise<void>}
  */
-async function fetchProgramTemplate(token, schoolId, env, baseUrl) {
+async function fetchProgramTemplate(token, schoolId, env, baseUrl, logger: ILogger) {
   const endpoints = [
     `${baseUrl}/api/v1/${schoolId}/general/programTemplate`,
     `${baseUrl}/api/v2/${schoolId}/general/programTemplate`
@@ -159,14 +160,14 @@ async function fetchProgramTemplate(token, schoolId, env, baseUrl) {
   let lastError = null;
   for (const url of endpoints) {
     try {
-      console.log(`📡 Fetching program template for school: ${schoolId}...`);
-      console.log(`🌐 API URL: ${url}`);
+      logger.log(`📡 Fetching program template for school: ${schoolId}...`);
+      logger.log(`🌐 API URL: ${url}`);
       const response = await axios.get(url, { headers });
       if (response.data) {
-        console.log('✅ Program template received successfully');
+        logger.log('✅ Program template received successfully');
         const resourcesDir = path.join(__dirname, 'Resources');
         if (!fs.existsSync(resourcesDir)) {
-          console.log('📁 Creating Resources directory...');
+          logger.log('📁 Creating Resources directory...');
           fs.mkdirSync(resourcesDir, { recursive: true });
         }
 
@@ -176,17 +177,17 @@ async function fetchProgramTemplate(token, schoolId, env, baseUrl) {
         const filename = `${schoolId}-programTemplate-${dateStr}.json`;
         const filepath = path.join(resourcesDir, filename);
 
-        console.log(`💾 Saving template to: ${filepath}`);
+        logger.log(`💾 Saving template to: ${filepath}`);
         fs.writeFileSync(filepath, JSON.stringify(response.data, null, 2));
 
-        console.log(`✅ Program template saved as: ${filename}`);
+        logger.log(`✅ Program template saved as: ${filename}`);
         return;
       }
     } catch (error) {
       lastError = error;
-      console.warn(`⚠️ Unable to fetch program template from ${url}: ${error.message}`);
+      logger.warn(`⚠️ Unable to fetch program template from ${url}: ${error.message}`);
       if (error.response) {
-        console.warn(`Response status: ${error.response.status}`);
+        logger.warn(`Response status: ${error.response.status}`);
       }
       if (error.response?.status === 404) {
         continue; // try next endpoint
@@ -205,7 +206,7 @@ async function fetchProgramTemplate(token, schoolId, env, baseUrl) {
  * @param {string} schoolId - School ID
  * @returns {Promise<string>} Session token
  */
-async function getSchoolTemplate(credentials, env, schoolId) {
+async function getSchoolTemplate(credentials, env, schoolId, logger: ILogger) {
   const baseUrl = env === 'prd'
     ? 'https://app.coursedog.com'
     : 'https://staging.coursedog.com';
@@ -232,14 +233,14 @@ async function getSchoolTemplate(credentials, env, schoolId) {
       const response = await axios.post(url, body, { headers });
 
       if (response.data && response.data.token) {
-        console.log('✅ Authentication successful');
+        logger.log('✅ Authentication successful');
         const token = response.data.token;
 
         // Fetch both section and course templates after successful authentication
-        await fetchSectionTemplate(token, schoolId, env, baseUrl);
-        await fetchCourseTemplate(token, schoolId, env, baseUrl);
+        await fetchSectionTemplate(token, schoolId, env, baseUrl, logger);
+        await fetchCourseTemplate(token, schoolId, env, baseUrl, logger);
         if (schoolId.includes('_peoplesoft')) {
-          await fetchProgramTemplate(token, schoolId, env, baseUrl);
+          await fetchProgramTemplate(token, schoolId, env, baseUrl, logger);
         }
 
         return token;
@@ -247,7 +248,7 @@ async function getSchoolTemplate(credentials, env, schoolId) {
         throw new Error('No token received in response');
       }
     } catch (_) {
-      console.log('Authentication failed');
+      logger.log('Authentication failed');
       if (attempt === maxAttempts) {
         throw new Error('Authentication failed after 5 attempts');
       }
@@ -255,4 +256,5 @@ async function getSchoolTemplate(credentials, env, schoolId) {
   }
 }
 
-module.exports = { getSchoolTemplate }; 
+export { getSchoolTemplate };
+

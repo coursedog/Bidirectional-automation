@@ -1,3 +1,5 @@
+import type { ILogger } from './services/interfaces/ILogger';
+
 /**
  * Seeds cookies and localStorage for the session.
  * @param {BrowserContext} ctx
@@ -5,7 +7,7 @@
  * @param {string} email
  * @param {string} schoolId
  */
-async function seedContext(ctx, baseDomain, email, schoolId) {
+async function seedContext(ctx, baseDomain, email, schoolId, logger: ILogger) {
   const url = `https://${baseDomain}`;
 
   const cookies = [
@@ -28,8 +30,8 @@ async function seedContext(ctx, baseDomain, email, schoolId) {
   ];
 
   // Debug logging
-  console.log('Setting cookies with url:', url);
-  console.log('Cookies:', JSON.stringify(cookies, null, 2));
+  logger.log('Setting cookies with url:', url);
+  logger.log('Cookies:', JSON.stringify(cookies, null, 2));
 
   await ctx.addCookies(cookies);
 
@@ -41,4 +43,5 @@ async function seedContext(ctx, baseDomain, email, schoolId) {
   }, schoolId);
 }
 
-module.exports = { seedContext };
+export { seedContext };
+

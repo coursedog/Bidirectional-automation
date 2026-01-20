@@ -1,19 +1,21 @@
-const fs = require('fs');
-const path = require('path');
-const { offerUserTakeover, waitForUserResponseWithTimeout } = require('./userTakeover');
-const { checkForApiError } = require('./sectionTemplateFill');
+import fs from 'fs';
+import path from 'path';
+import { checkForApiError } from './sectionTemplateFill';
+import type { ILogger } from './services/interfaces/ILogger';
+import { offerUserTakeover, waitForUserResponseWithTimeout } from './userTakeover';
+
 const { screenshotFormRoot } = require('./form-screenshot');
 
 // Simple run-scoped logger that mirrors console output to Logs.md in the run folder
-function ensureRunLogger(outputDir) {
+function ensureRunLogger(outputDir, logger: ILogger) {
   try {
     if (!outputDir) return;
     if (!global.__origConsole) {
       global.__origConsole = {
-        log: console.log,
-        warn: console.warn,
-        error: console.error,
-        info: console.info,
+        log: logger.log,
+        warn: logger.warn,
+        error: logger.error,
+        info: logger.info,
       };
       const forward = (method) => (...args) => {
         try {
@@ -27,10 +29,10 @@ function ensureRunLogger(outputDir) {
         } catch (_) { }
         try { global.__origConsole[method](...args); } catch (_) { }
       };
-      console.log = forward('log');
-      console.warn = forward('warn');
-      console.error = forward('error');
-      console.info = forward('info');
+      logger.log = forward('log');
+      logger.warn = forward('warn');
+      logger.error = forward('error');
+      logger.info = forward('info');
     }
     const logFile = path.join(outputDir, 'Logs.md');
     global.__runLogger = { logFile };
@@ -41,13 +43,13 @@ function ensureRunLogger(outputDir) {
 }
 
 // Record per-field skip reasons for later inclusion in diff comments
-function recordSkipReason(qid, reason) {
+function recordSkipReason(qid, reason, logger: ILogger) {
   try {
     if (!qid) return;
     global.__fieldSkipReasons = global.__fieldSkipReasons || {};
     if (!global.__fieldSkipReasons[qid]) {
       global.__fieldSkipReasons[qid] = reason || 'Skipped';
-      console.log(`SKIP_FIELD ${qid}: ${global.__fieldSkipReasons[qid]}`);
+      logger.log(`SKIP_FIELD ${qid}: ${global.__fieldSkipReasons[qid]}`);
     }
   } catch (_) { }
 }
@@ -91,7 +93,7 @@ function isDeepEqual(a, b) {
  * @param {string} action - Current action/test case being performed (for tracking)
  * @returns {Object|null} - The suitable course row element or null if not found
  */
-async function findActiveCourse(page, browser = null, subfolder = null, schoolId = null, action = null) {
+async function findActiveCourse(page, browser = null, subfolder = null, schoolId = null, action = null, logger: ILogger) {
   let currentPage = 1;
   const maxPages = 20; // Safety limit to prevent infinite loops
   const validStatusKeywords = ['approv', 'releas', 'publish']; // Contains-based matching
@@ -100,10 +102,10 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
   // Use global session-based course tracking
   const sessionUsedCourses = global.sessionUsedCourses || new Set();
 
-  console.log(`📋 Session course tracking: ${sessionUsedCourses.size} courses already used`);
+  logger.log(`📋 Session course tracking: ${sessionUsedCourses.size} courses already used`);
 
   while (currentPage <= maxPages) {
-    console.log(`📄 Searching page ${currentPage} for suitable courses...`);
+    logger.log(`📄 Searching page ${currentPage} for suitable courses...`);
 
     // Wait for table to load
     await page.waitForSelector('[data-test="coursesTable"] tbody tr', { timeout: 10000 });
@@ -113,7 +115,7 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
     const rows = page.locator('[data-test="coursesTable"] tbody tr');
     const rowCount = await rows.count();
 
-    console.log(`   ┣ Found ${rowCount} courses on page ${currentPage}`);
+    logger.log(`   ┣ Found ${rowCount} courses on page ${currentPage}`);
 
     // Check each row for suitable status
     for (let i = 0; i < rowCount; i++) {
@@ -132,28 +134,28 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
         const firstCellText = await firstCell.textContent();
         if (firstCellText && firstCellText.trim()) {
           courseCode = firstCellText.trim();
-          console.log(`   ┣ 🔍 Checking course with code: "${courseCode}"`);
+          logger.log(`   ┣ 🔍 Checking course with code: "${courseCode}"`);
         }
       }
 
       if (!courseCode) {
-        console.log(`   ┣ ⚠️ Skipping row ${i + 1} - no course code found`);
+        logger.log(`   ┣ ⚠️ Skipping row ${i + 1} - no course code found`);
         continue;
       }
 
       // For Workday schools, skip status validation entirely
       const skipStatusValidation = typeof schoolId === 'string' && schoolId.toLowerCase().includes('workday');
       if (skipStatusValidation) {
-        console.log(`   ┣ ⏭️ Skipping status validation for schoolId "${schoolId}"`);
+        logger.log(`   ┣ ⏭️ Skipping status validation for schoolId "${schoolId}"`);
         // Still avoid reusing the same course in a single session
         if (sessionUsedCourses.has(courseCode)) {
-          console.log(`   ┣ ⏭️ Skipping previously used course code "${courseCode}"`);
+          logger.log(`   ┣ ⏭️ Skipping previously used course code "${courseCode}"`);
           continue;
         }
-        console.log(`   ┗ ✅ Selected course "${courseCode}" without status check (Workday mode)`);
+        logger.log(`   ┗ ✅ Selected course "${courseCode}" without status check (Workday mode)`);
         sessionUsedCourses.add(courseCode);
-        console.log(`   ┗ 📝 Tracked course code "${courseCode}" for test case "${action}" in session`);
-        console.log(`   ┗ 📊 Session now has ${sessionUsedCourses.size} used course codes`);
+        logger.log(`   ┗ 📝 Tracked course code "${courseCode}" for test case "${action}" in session`);
+        logger.log(`   ┗ 📊 Session now has ${sessionUsedCourses.size} used course codes`);
         return row;
       }
 
@@ -182,12 +184,12 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
               : containsMatch;
 
             // Check if this course code was already used in this session
-            console.log(`   ┣ 🔍 Checking if course code "${courseCode}" was already used...`);
-            console.log(`   ┣ Used course codes in session: ${Array.from(sessionUsedCourses).join(', ') || 'none'}`);
+            logger.log(`   ┣ 🔍 Checking if course code "${courseCode}" was already used...`);
+            logger.log(`   ┣ Used course codes in session: ${Array.from(sessionUsedCourses).join(', ') || 'none'}`);
 
             if (sessionUsedCourses.has(courseCode)) {
-              console.log(`   ┣ ⏭️ Skipping previously used course code "${courseCode}" (status: "${cellText.trim()}")`);
-              console.log(`   ┣ This course was used in a previous test case in this session`);
+              logger.log(`   ┣ ⏭️ Skipping previously used course code "${courseCode}" (status: "${cellText.trim()}")`);
+              logger.log(`   ┣ This course was used in a previous test case in this session`);
               continue; // Skip to next row
             }
 
@@ -209,17 +211,17 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
                 }
               }
               if (hasCDSuffix) {
-                console.log(`   ┣ ⏭️ Skipping course "${courseCode}" - row contains a CD test suffix (-CD, -CDt, -CDte, -CDtes, -CDtest)`);
+                logger.log(`   ┣ ⏭️ Skipping course "${courseCode}" - row contains a CD test suffix (-CD, -CDt, -CDte, -CDtes, -CDtest)`);
                 break; // move to next row
               }
             } catch (_) { }
 
-            console.log(`   ┗ ✅ Found suitable course "${courseCode}" (status: "${cellText.trim()}", matched "${matchedKeyword}" as ${matchType}) in row ${i + 1} on page ${currentPage}`);
+            logger.log(`   ┗ ✅ Found suitable course "${courseCode}" (status: "${cellText.trim()}", matched "${matchedKeyword}" as ${matchType}) in row ${i + 1} on page ${currentPage}`);
 
             // Track this course selection in the session
             sessionUsedCourses.add(courseCode);
-            console.log(`   ┗ 📝 Tracked course code "${courseCode}" for test case "${action}" in session`);
-            console.log(`   ┗ 📊 Session now has ${sessionUsedCourses.size} used course codes`);
+            logger.log(`   ┗ 📝 Tracked course code "${courseCode}" for test case "${action}" in session`);
+            logger.log(`   ┗ 📊 Session now has ${sessionUsedCourses.size} used course codes`);
 
             return row;
           }
@@ -227,7 +229,7 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
       }
     }
 
-    console.log(`   ┗ ❌ No suitable courses found on page ${currentPage}`);
+    logger.log(`   ┗ ❌ No suitable courses found on page ${currentPage}`);
 
     // Look for next page button (keyboard_arrow_right icon or other pagination buttons)
     const nextButton = page.locator('button[data-test="keyArrowRight"], button:has([data-test="keyArrowRight"]), button[aria-label*="next"], .pagination-next, [title*="Next"], button:has(.material-icons:text("keyboard_arrow_right"))');
@@ -238,35 +240,35 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
       const isNextVisible = await nextButton.first().isVisible().catch(() => false);
 
       if (isNextEnabled && isNextVisible) {
-        console.log(`   ┣ Moving to next page...`);
+        logger.log(`   ┣ Moving to next page...`);
         await nextButton.first().click();
         await page.waitForTimeout(2000); // Wait for page to load
         currentPage++;
       } else {
-        console.log(`   ┗ 🚫 Next button is disabled or not visible - reached end of pages`);
+        logger.log(`   ┗ 🚫 Next button is disabled or not visible - reached end of pages`);
         break;
       }
     } else {
-      console.log(`   ┗ 🚫 No next button found - only one page or reached end`);
+      logger.log(`   ┗ 🚫 No next button found - only one page or reached end`);
       break;
     }
   }
 
   // No suitable courses found after searching all pages
-  console.log(`❌ No suitable courses found after searching ${currentPage - 1} pages`);
-  console.log(`🔍 Searched for courses with status exactly matching: ${exactStatusKeywords.join(', ')} OR containing: ${validStatusKeywords.join(', ')}`);
+  logger.log(`❌ No suitable courses found after searching ${currentPage - 1} pages`);
+  logger.log(`🔍 Searched for courses with status exactly matching: ${exactStatusKeywords.join(', ')} OR containing: ${validStatusKeywords.join(', ')}`);
 
   // Check if we have used courses and should reset the tracking for a retry
   if (sessionUsedCourses.size > 0) {
-    console.log(`🔄 All ${sessionUsedCourses.size} suitable courses may have been used in this session. Resetting session tracking and retrying...`);
+    logger.log(`🔄 All ${sessionUsedCourses.size} suitable courses may have been used in this session. Resetting session tracking and retrying...`);
     sessionUsedCourses.clear();
-    console.log(`✅ Session course tracking reset. Attempting to find courses again...`);
+    logger.log(`✅ Session course tracking reset. Attempting to find courses again...`);
     // Recursive call with reset tracking
-    return await findActiveCourse(page, browser, subfolder, schoolId, action);
+    return await findActiveCourse(page, browser, subfolder, schoolId, action, logger);
   }
 
   if (browser && subfolder && schoolId) {
-    console.log('\n🤝 Offering user intervention to manually select a course...');
+    logger.log('\n🤝 Offering user intervention to manually select a course...');
 
     const allKeywords = [...exactStatusKeywords, ...validStatusKeywords];
     const takeoverResult = await offerUserTakeover(
@@ -285,11 +287,11 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
       // User manually selected a course - mark it as used in the session
       if (takeoverResult.selectedCourseCode) {
         sessionUsedCourses.add(takeoverResult.selectedCourseCode);
-        console.log(`📝 Tracked manually selected course code "${takeoverResult.selectedCourseCode}" in session`);
+        logger.log(`📝 Tracked manually selected course code "${takeoverResult.selectedCourseCode}" in session`);
       }
       return takeoverResult.row;
     } else {
-      console.log('❌ User intervention failed or was declined');
+      logger.log('❌ User intervention failed or was declined');
       return null;
     }
   }
@@ -304,74 +306,74 @@ async function findActiveCourse(page, browser = null, subfolder = null, schoolId
  * @param {string} schoolId - School identifier
  * @param {Object} browser - Playwright browser object
  */
-async function createCourse(page, subfolder, schoolId, browser = null, formName = 'Propose New Course') {
+async function createCourse(page, subfolder, schoolId, browser = null, formName = 'Propose New Course', logger: ILogger) {
   try {
-    ensureRunLogger(subfolder);
-    console.log(`\n📚 Starting course creation process...`);
+    ensureRunLogger(subfolder, logger);
+    logger.log(`\n📚 Starting course creation process...`);
 
     // Wait for courses table to load
-    console.log('⏳ Waiting for courses table to load...');
+    logger.log('⏳ Waiting for courses table to load...');
     await page.waitForSelector('[data-test="coursesTable"]', { timeout: 30000 });
-    console.log('✅ Courses table loaded successfully');
+    logger.log('✅ Courses table loaded successfully');
 
     // Click on the "Propose New Course" button
-    console.log('🔍 Looking for Propose New Course button...');
+    logger.log('🔍 Looking for Propose New Course button...');
     const proposeButton = page.locator('[data-test="proposeNewCourseBtn"]');
     await proposeButton.waitFor({ state: 'visible', timeout: 30000 });
-    console.log('✅ Propose New Course button found');
+    logger.log('✅ Propose New Course button found');
 
-    console.log('🖱️ Clicking Propose New Course button...');
+    logger.log('🖱️ Clicking Propose New Course button...');
     await proposeButton.click();
-    console.log('✅ Propose New Course button clicked');
+    logger.log('✅ Propose New Course button clicked');
 
     // Wait for the "Add new course" modal to appear
-    console.log('⏳ Waiting for Add new course modal...');
+    logger.log('⏳ Waiting for Add new course modal...');
     await page.waitForSelector('text=Add new course', { timeout: 30000 });
-    console.log('✅ Add new course modal appeared');
+    logger.log('✅ Add new course modal appeared');
 
     // Click on the form selection dropdown (multiselect wrapper)
-    console.log('🔍 Looking for form selection dropdown...');
+    logger.log('🔍 Looking for form selection dropdown...');
     const formSelectWrapper = page.locator('.multiselect').filter({ hasText: 'Select form' });
     await formSelectWrapper.waitFor({ state: 'visible', timeout: 30000 });
-    console.log('✅ Form selection dropdown found');
+    logger.log('✅ Form selection dropdown found');
 
-    console.log('🖱️ Clicking form selection dropdown...');
+    logger.log('🖱️ Clicking form selection dropdown...');
     await formSelectWrapper.click();
     await page.waitForTimeout(1000); // Wait for dropdown to open
-    console.log('✅ Form selection dropdown opened');
+    logger.log('✅ Form selection dropdown opened');
 
     // Select the specified form option
-    console.log(`🔍 Looking for "${formName}" option...`);
+    logger.log(`🔍 Looking for "${formName}" option...`);
     const proposeOption = page.locator(`[aria-label="${formName}"]`);
     await proposeOption.waitFor({ state: 'visible', timeout: 30000 });
-    console.log(`✅ "${formName}" option found`);
+    logger.log(`✅ "${formName}" option found`);
 
-    console.log(`🖱️ Selecting "${formName}" option...`);
+    logger.log(`🖱️ Selecting "${formName}" option...`);
     await proposeOption.click();
-    console.log(`✅ "${formName}" option selected`);
+    logger.log(`✅ "${formName}" option selected`);
 
     // Click Submit button
-    console.log('🔍 Looking for Submit button...');
+    logger.log('🔍 Looking for Submit button...');
     const submitButton = page.locator('button:has-text("SUBMIT")');
     await submitButton.waitFor({ state: 'visible', timeout: 30000 });
-    console.log('✅ Submit button found');
+    logger.log('✅ Submit button found');
 
-    console.log('🖱️ Clicking Submit button...');
+    logger.log('🖱️ Clicking Submit button...');
     await submitButton.click();
-    console.log('✅ Submit button clicked');
+    logger.log('✅ Submit button clicked');
 
     // Wait for the course proposal form to load (with fallback)
-    console.log('⏳ Waiting for course proposal form to load...');
+    logger.log('⏳ Waiting for course proposal form to load...');
 
     // Check if rationale field is present
     const rationalePresent = await page.waitForSelector('[data-test="Rationale"]', { timeout: 3000 }).then(() => true).catch(() => false);
 
     if (rationalePresent) {
       await page.waitForTimeout(3000); // Additional wait for all form elements to load
-      console.log('✅ Course proposal form with rationale loaded successfully');
+      logger.log('✅ Course proposal form with rationale loaded successfully');
 
       // Fill the rationale field
-      console.log('📝 Filling rationale field...');
+      logger.log('📝 Filling rationale field...');
       try {
         const rationaleWrapper = page.locator('[data-test="Rationale"]');
         const rationaleField = rationaleWrapper.locator('input, textarea').first();
@@ -379,87 +381,87 @@ async function createCourse(page, subfolder, schoolId, browser = null, formName 
         // Check if we found an input field
         const inputCount = await rationaleField.count();
         if (inputCount === 0) {
-          console.log('⚠️ No input/textarea found in rationale wrapper, trying alternative approach...');
+          logger.log('⚠️ No input/textarea found in rationale wrapper, trying alternative approach...');
           // Try to find by placeholder or label
           const altField = page.locator('input[placeholder*="rationale"], textarea[placeholder*="rationale"], input[placeholder*="Rationale"], textarea[placeholder*="Rationale"]').first();
           if (await altField.count() > 0) {
             await altField.clear();
             await altField.fill('Propose a new course test - Coursedog');
-            console.log('✅ Rationale field filled via alternative method');
+            logger.log('✅ Rationale field filled via alternative method');
           } else {
-            console.log('⚠️ Could not find rationale input field, skipping rationale step');
+            logger.log('⚠️ Could not find rationale input field, skipping rationale step');
           }
         } else {
           await rationaleField.clear();
           await rationaleField.fill('Propose a new course test - Coursedog');
-          console.log('✅ Rationale field filled');
+          logger.log('✅ Rationale field filled');
         }
       } catch (rationaleError) {
-        console.log(`⚠️ Error filling rationale field, skipping: ${rationaleError.message}`);
+        logger.log(`⚠️ Error filling rationale field, skipping: ${rationaleError.message}`);
       }
     } else {
-      console.log('⚠️ Rationale field not found, skipping rationale step and proceeding with form filling');
+      logger.log('⚠️ Rationale field not found, skipping rationale step and proceeding with form filling');
       await page.waitForTimeout(3000); // Give some time for form to load
     }
 
     // Take screenshot of the form before changes
-    console.log('📸 Taking screenshot before changes...');
+    logger.log('📸 Taking screenshot before changes...');
     const beforeScreenshotPath = path.join(subfolder, `${schoolId}-createCourse-form-before.png`);
     await page.screenshot({
       path: beforeScreenshotPath,
       fullPage: true
     });
-    console.log(`✅ Before screenshot saved: ${beforeScreenshotPath}`);
+    logger.log(`✅ Before screenshot saved: ${beforeScreenshotPath}`);
 
     // Read original course values
-    console.log('📝 Reading original course values...');
-    const beforeValues = await readCourseValues(page, schoolId);
-    console.log('✅ Original course values captured');
+    logger.log('📝 Reading original course values...');
+    const beforeValues = await readCourseValues(page, schoolId, logger);
+    logger.log('✅ Original course values captured');
 
     // Fill all form fields (no skip fields for creation)
-    console.log('📋 Reading course template and filling all fields...');
+    logger.log('📋 Reading course template and filling all fields...');
     global.__currentCourseContext = { browser, subfolder, schoolId, action: 'createCourse' };
     try {
-      await fillCourseTemplate(page, schoolId, 'createCourse');
+      await fillCourseTemplate(page, schoolId, 'createCourse', logger);
     } finally {
       global.__currentCourseContext = null;
     }
-    console.log('✅ Course template filled');
+    logger.log('✅ Course template filled');
 
     // Special handling for colleague_ethos schools - fill Credit Hours Min field
     if (schoolId.includes('colleague_ethos')) {
-      console.log('🔍 [colleague_ethos] Looking for Credit Hours Min field...');
-      await fillCreditHoursMinField(page);
+      logger.log('🔍 [colleague_ethos] Looking for Credit Hours Min field...');
+      await fillCreditHoursMinField(page, logger);
     }
 
     // Read course values after changes
-    console.log('📝 Reading course values after changes...');
-    const afterValues = await readCourseValues(page, schoolId);
-    console.log('✅ Modified course values captured');
+    logger.log('📝 Reading course values after changes...');
+    const afterValues = await readCourseValues(page, schoolId, logger);
+    logger.log('✅ Modified course values captured');
 
     // Compare and save differences
-    console.log('🔍 Comparing field differences...');
-    await saveCourseFieldDifferences(beforeValues, afterValues, subfolder, schoolId, 'createCourse');
-    console.log('✅ Field differences saved');
+    logger.log('🔍 Comparing field differences...');
+    await saveCourseFieldDifferences(beforeValues, afterValues, subfolder, schoolId, 'createCourse', logger);
+    logger.log('✅ Field differences saved');
 
     // Take screenshot of the form after changes
-    console.log('📸 Taking course form screenshot after changes...');
+    logger.log('📸 Taking course form screenshot after changes...');
     const afterScreenshotPath = path.join(subfolder, `${schoolId}-createCourse-form-after.png`);
     await screenshotCourseForm(page, afterScreenshotPath);
-    console.log(`✅ After screenshot saved: ${afterScreenshotPath}`);
+    logger.log(`✅ After screenshot saved: ${afterScreenshotPath}`);
 
     // Attempt to save the course proposal
-    const saveSuccess = await saveCourse(page, subfolder, schoolId, browser);
+    const saveSuccess = await saveCourse(page, subfolder, schoolId, browser, logger);
     if (saveSuccess) {
-      console.log('🎉 Course creation and save process completed successfully');
+      logger.log('🎉 Course creation and save process completed successfully');
     } else {
-      console.log('⚠️ Course creation completed but save may have failed');
+      logger.log('⚠️ Course creation completed but save may have failed');
     }
 
     return saveSuccess; // Return actual save success status
 
   } catch (error) {
-    console.error('❌ Error in createCourse:', error.message);
+    logger.error('❌ Error in createCourse:', error.message);
     throw error;
   }
 }
@@ -477,7 +479,7 @@ async function screenshotCourseForm(page, outputPath, rootSelector = 'form[data-
 /**
  * Fill generic subfields for a complex field using its template config
  */
-async function fillSubfieldsFromConfig(page, question, action = 'updateCourse') {
+async function fillSubfieldsFromConfig(page, question, action = 'updateCourse', logger: ILogger) {
   try {
     const fields = question?.config?.fields || {};
     for (const [subKey, cfg] of Object.entries(fields)) {
@@ -485,20 +487,20 @@ async function fillSubfieldsFromConfig(page, question, action = 'updateCourse') 
       const subQuestion = {
         qid: `${question.qid}.${subKey}`,
         dataKey: `${question.qid}.${subKey}`,
-        label: cfg.label || `${question.qid} ${subKey}`,
-        questionType: cfg.inputType || cfg.type || 'text',
-        type: cfg.inputType || cfg.type || 'text',
-        isVisibleInForm: !cfg.hidden,
-        hidden: cfg.hidden || false,
-        required: !!cfg.required,
+        label: (cfg as unknown as any).label || `${question.qid} ${subKey}`,
+        questionType: (cfg as unknown as any).inputType || (cfg as unknown as any).type || 'text',
+        type: (cfg as unknown as any).inputType || (cfg as unknown as any).type || 'text',
+        isVisibleInForm: !(cfg as unknown as any).hidden,
+        hidden: (cfg as unknown as any).hidden || false,
+        required: !!(cfg as unknown as any).required,
       };
 
       try {
-        await fillCourseField(page, subQuestion, action);
+        await fillCourseField(page, subQuestion, action, logger);
       } catch (_) { }
     }
   } catch (err) {
-    console.log(`   ┗ ⚠️ Error in fillSubfieldsFromConfig for ${question?.qid}: ${err.message}`);
+    logger.log(`   ┗ ⚠️ Error in fillSubfieldsFromConfig for ${question?.qid}: ${err.message}`);
   }
 }
 
@@ -509,32 +511,32 @@ async function fillSubfieldsFromConfig(page, question, action = 'updateCourse') 
  * @param {string} schoolId - School identifier
  * @param {string} action - Action type ('updateCourse' or 'inactivateCourse')
  */
-async function updateCourse(page, subfolder, schoolId, browser = null, action = 'updateCourse') {
+async function updateCourse(page, subfolder, schoolId, browser = null, action = 'updateCourse', logger: ILogger) {
   try {
-    ensureRunLogger(subfolder);
+    ensureRunLogger(subfolder, logger);
     const actionName = action === 'inactivateCourse' ? 'course inactivation' : 'course update';
-    console.log(`\n📚 Starting ${actionName} process...`);
+    logger.log(`\n📚 Starting ${actionName} process...`);
 
     // Wait for courses table to load
-    console.log('⏳ Waiting for courses table to load...');
+    logger.log('⏳ Waiting for courses table to load...');
     await page.waitForSelector('[data-test="coursesTable"]', { timeout: 30000 });
-    console.log('✅ Courses table loaded successfully');
+    logger.log('✅ Courses table loaded successfully');
 
     // Find and click on the first suitable course, skipping any with SIS sync error banner
-    console.log('🔍 Looking for suitable courses...');
+    logger.log('🔍 Looking for suitable courses...');
     let attempts = 0;
     const maxAttempts = 30; // safety to avoid infinite loops across many pages
     while (true) {
-      const suitableCourse = await findActiveCourse(page, browser, subfolder, schoolId, action);
+      const suitableCourse = await findActiveCourse(page, browser, subfolder, schoolId, action, logger);
       if (!suitableCourse) {
         throw new Error('No suitable courses found and user intervention was declined or failed');
       }
       if (suitableCourse.userSelected) {
-        console.log('✅ User manually selected a course');
+        logger.log('✅ User manually selected a course');
       } else {
-        console.log('🖱️ Clicking on suitable course...');
+        logger.log('🖱️ Clicking on suitable course...');
         await suitableCourse.click();
-        console.log('✅ Suitable course selected');
+        logger.log('✅ Suitable course selected');
       }
 
       // After landing on the course page, give UI time to render banner, then check
@@ -542,7 +544,7 @@ async function updateCourse(page, subfolder, schoolId, browser = null, action = 
       const syncErrorBanner = page.locator('[data-test="integrationSyncStatus"].alert-danger');
       const hasSyncError = (await syncErrorBanner.count()) > 0 && await syncErrorBanner.first().isVisible();
       if (hasSyncError) {
-        console.log('⛔ Detected SIS sync error banner on selected course. Skipping this course...');
+        logger.log('⛔ Detected SIS sync error banner on selected course. Skipping this course...');
         // Never click back-to-list (it opens a confirmation modal). Use history back only.
         await page.goBack();
         await page.waitForSelector('[data-test="coursesTable"]', { timeout: 30000 });
@@ -558,7 +560,7 @@ async function updateCourse(page, subfolder, schoolId, browser = null, action = 
     }
 
     // Validate and click the edit course button with retries for "proposal in flight"
-    console.log('🔍 Validating edit course button (with retry for "proposal in flight")...');
+    logger.log('🔍 Validating edit course button (with retry for "proposal in flight")...');
     const maxEditRetries = 3;
     let editClicked = false;
     for (let attempt = 1; attempt <= maxEditRetries; attempt++) {
@@ -571,21 +573,21 @@ async function updateCourse(page, subfolder, schoolId, browser = null, action = 
       const hasProposalInFlight = await page.locator('text=/proposal\s+in\s+flight/i').first().isVisible().catch(() => false);
 
       if (!looksDisabled && !hasProposalInFlight) {
-        console.log(`🖱️ Clicking edit course button (attempt ${attempt})...`);
+        logger.log(`🖱️ Clicking edit course button (attempt ${attempt})...`);
         try {
           await editButton.click();
           editClicked = true;
-          console.log('✅ Edit course button clicked');
+          logger.log('✅ Edit course button clicked');
           break;
         } catch (clickErr) {
-          console.log(`⚠️ Click failed on attempt ${attempt}: ${clickErr.message}`);
+          logger.log(`⚠️ Click failed on attempt ${attempt}: ${clickErr.message}`);
         }
       } else {
-        console.log(`⛔ Edit course button disabled or "proposal in flight" detected (attempt ${attempt}/${maxEditRetries}).`);
+        logger.log(`⛔ Edit course button disabled or "proposal in flight" detected (attempt ${attempt}/${maxEditRetries}).`);
       }
 
       if (attempt < maxEditRetries) {
-        console.log('🔄 Refreshing page and retrying...');
+        logger.log('🔄 Refreshing page and retrying...');
         await page.reload();
         await page.waitForSelector('[data-test="edit-course-btn"]', { timeout: 15000 });
         await page.waitForTimeout(500);
@@ -593,7 +595,7 @@ async function updateCourse(page, subfolder, schoolId, browser = null, action = 
     }
 
     if (!editClicked) {
-      console.log('❌ Unable to click edit course button after retries');
+      logger.log('❌ Unable to click edit course button after retries');
       if (browser && subfolder && schoolId) {
         try {
           const userResponse = await waitForUserResponseWithTimeout(5);
@@ -624,60 +626,60 @@ async function updateCourse(page, subfolder, schoolId, browser = null, action = 
     }
 
     // Wait for the course modal to be fully loaded
-    console.log('⏳ Waiting for course modal to load...');
+    logger.log('⏳ Waiting for course modal to load...');
     await page.waitForSelector('[data-test="course-form-wrapper"]', { timeout: 30000 });
     await page.waitForTimeout(3000); // Additional wait for all form elements to load
-    console.log('✅ Course modal loaded successfully');
+    logger.log('✅ Course modal loaded successfully');
 
     // Take targeted screenshot of the course form wrapper before changes
-    console.log('📸 Taking course form screenshot before changes...');
+    logger.log('📸 Taking course form screenshot before changes...');
     const beforeScreenshotPath = path.join(subfolder, `${schoolId}-updateCourse-fullModal-before.png`);
     await screenshotCourseForm(page, beforeScreenshotPath);
-    console.log(`✅ Before screenshot saved: ${beforeScreenshotPath}`);
+    logger.log(`✅ Before screenshot saved: ${beforeScreenshotPath}`);
 
     // Read original course values
-    console.log('📝 Reading original course values...');
-    const beforeValues = await readCourseValues(page, schoolId);
-    console.log('✅ Original course values captured');
+    logger.log('📝 Reading original course values...');
+    const beforeValues = await readCourseValues(page, schoolId, logger);
+    logger.log('✅ Original course values captured');
 
     // Read course template and fill fields
-    console.log('📋 Reading course template and filling fields...');
+    logger.log('📋 Reading course template and filling fields...');
     global.__currentCourseContext = { browser, subfolder, schoolId, action };
     try {
-      await fillCourseTemplate(page, schoolId, action);
+      await fillCourseTemplate(page, schoolId, action, logger);
     } finally {
       global.__currentCourseContext = null;
     }
-    console.log('✅ Course template filled');
+    logger.log('✅ Course template filled');
 
     // Read course values after changes
-    console.log('📝 Reading course values after changes...');
-    const afterValues = await readCourseValues(page, schoolId);
-    console.log('✅ Modified course values captured');
+    logger.log('📝 Reading course values after changes...');
+    const afterValues = await readCourseValues(page, schoolId, logger);
+    logger.log('✅ Modified course values captured');
 
     // Compare and save differences
-    console.log('🔍 Comparing field differences...');
-    await saveCourseFieldDifferences(beforeValues, afterValues, subfolder, schoolId, action);
-    console.log('✅ Field differences saved');
+    logger.log('🔍 Comparing field differences...');
+    await saveCourseFieldDifferences(beforeValues, afterValues, subfolder, schoolId, action, logger);
+    logger.log('✅ Field differences saved');
 
     // Take targeted screenshot of the course form wrapper after changes
-    console.log('📸 Taking course form screenshot after changes...');
+    logger.log('📸 Taking course form screenshot after changes...');
     const afterScreenshotPath = path.join(subfolder, `${schoolId}-${action}-fullModal-after.png`);
     await screenshotCourseForm(page, afterScreenshotPath);
-    console.log(`✅ After screenshot saved: ${afterScreenshotPath}`);
+    logger.log(`✅ After screenshot saved: ${afterScreenshotPath}`);
 
     // Attempt to save the course (if save functionality exists)
-    const saveSuccess = await saveCourse(page, subfolder, schoolId, browser);
+    const saveSuccess = await saveCourse(page, subfolder, schoolId, browser, logger);
     if (saveSuccess) {
-      console.log('🎉 Course update and save process completed successfully');
+      logger.log('🎉 Course update and save process completed successfully');
     } else {
-      console.log('⚠️ Course update completed but save may have failed');
+      logger.log('⚠️ Course update completed but save may have failed');
     }
 
     return saveSuccess; // Return actual save success status
 
   } catch (error) {
-    console.error('❌ Error in updateCourse:', error.message);
+    logger.error('❌ Error in updateCourse:', error.message);
     throw error;
   }
 }
@@ -712,14 +714,14 @@ function cleanFieldIdentifier(identifier) {
  * @param {string} schoolId - School identifier
  * @returns {Object} - Object containing all course field values
  */
-async function readCourseValues(page, schoolId) {
+async function readCourseValues(page, schoolId, logger: ILogger) {
   try {
-    const templateFile = getLatestCourseTemplateFile(schoolId);
+    const templateFile = getLatestCourseTemplateFile(schoolId, logger);
     if (!templateFile) return {};
     const tpl = JSON.parse(fs.readFileSync(templateFile, 'utf8'));
     const questions = tpl?.courseTemplate?.questions || {};
     const qids = Object.keys(questions);
-    const values = { _hiddenFields: {} };
+    const values = { _hiddenFields: {} } as unknown as any;
 
     for (const qid of qids) {
       try {
@@ -900,7 +902,7 @@ async function readCourseValues(page, schoolId) {
           if (question && question.questionType === 'credits' && question.config && question.config.fields) {
             // Iterate credit field types and subfields
             for (const [fieldType, fieldCfg] of Object.entries(question.config.fields)) {
-              const subFields = fieldCfg && fieldCfg.fields ? Object.keys(fieldCfg.fields) : [];
+              const subFields = fieldCfg && (fieldCfg as unknown as any).fields ? Object.keys((fieldCfg as unknown as any).fields) : [];
               for (const subKey of subFields) {
                 try {
                   const selectors = [
@@ -938,8 +940,8 @@ async function readCourseValues(page, schoolId) {
             const paths = [];
             for (const [key, cfg] of Object.entries(fields)) {
               const current = prefix ? `${prefix}.${key}` : key;
-              if (cfg && typeof cfg === 'object' && cfg.fields && typeof cfg.fields === 'object') {
-                paths.push(...collectLeafPaths(cfg.fields, current));
+              if (cfg && typeof cfg === 'object' && (cfg as unknown as any).fields && typeof (cfg as unknown as any).fields === 'object') {
+                paths.push(...collectLeafPaths((cfg as unknown as any).fields, current));
               } else {
                 paths.push(current);
               }
@@ -1045,7 +1047,7 @@ async function readCourseValues(page, schoolId) {
 
     return values;
   } catch (err) {
-    console.error('❌ Error reading course values:', err.message);
+    logger.error('❌ Error reading course values:', err.message);
     return {};
   }
 }
@@ -1056,16 +1058,16 @@ async function readCourseValues(page, schoolId) {
  * @param {string} schoolId - School identifier
  * @param {string} action - Action type ('updateCourse' or 'inactivateCourse')
  */
-async function fillCourseTemplate(page, schoolId, action = 'updateCourse') {
+async function fillCourseTemplate(page, schoolId, action = 'updateCourse', logger: ILogger) {
   try {
     // Get the latest course template file
-    const templateFile = getLatestCourseTemplateFile(schoolId);
+    const templateFile = getLatestCourseTemplateFile(schoolId, logger);
     if (!templateFile) {
-      console.log('⚠️ No course template file found, skipping template fill');
+      logger.log('⚠️ No course template file found, skipping template fill');
       return;
     }
 
-    console.log(`📋 Using template file: ${templateFile}`);
+    logger.log(`📋 Using template file: ${templateFile}`);
     const templateContent = fs.readFileSync(templateFile, 'utf8');
     const template = JSON.parse(templateContent);
 
@@ -1081,14 +1083,14 @@ async function fillCourseTemplate(page, schoolId, action = 'updateCourse') {
       // Filter questions based on action type
       if (action === 'inactivateCourse') {
         questionKeys = questionKeys.filter(key => key === 'status' || key === 'effectiveEndDate');
-        console.log(`📝 Found ${questionKeys.length} inactivation-specific questions in course template (status, effectiveEndDate)`);
+        logger.log(`📝 Found ${questionKeys.length} inactivation-specific questions in course template (status, effectiveEndDate)`);
       } else if (action === 'newCourseRevision') {
         questionKeys = questionKeys.filter(key => key === 'effectiveStartDate');
-        console.log(`📝 Found ${questionKeys.length} revision-specific questions in course template (effectiveStartDate)`);
+        logger.log(`📝 Found ${questionKeys.length} revision-specific questions in course template (effectiveStartDate)`);
       } else if (action === 'createCourse') {
-        console.log(`📝 Found ${questionKeys.length} questions in course template (all fields for creation)`);
+        logger.log(`📝 Found ${questionKeys.length} questions in course template (all fields for creation)`);
       } else {
-        console.log(`📝 Found ${questionKeys.length} questions in course template`);
+        logger.log(`📝 Found ${questionKeys.length} questions in course template`);
       }
 
       let pageErrorCount = 0;
@@ -1117,28 +1119,28 @@ async function fillCourseTemplate(page, schoolId, action = 'updateCourse') {
           const isComplexField = complexFieldTypes.includes(question.questionType) && question.config && question.config.fields;
 
           if (isComplexField) {
-            console.log(`🏗️ Processing complex field with nested structure: ${questionKey} (${question.questionType})`);
+            logger.log(`🏗️ Processing complex field with nested structure: ${questionKey} (${question.questionType})`);
 
             // Special handling for credits field which has triple-nested structure
             if (question.questionType === 'credits') {
-              await fillNestedCreditFields(page, question, action);
+              await fillNestedCreditFields(page, question, action, logger);
             } else {
               // For other complex fields, try to fill the main field but mark as processed to prevent nested processing
-              await fillCourseField(page, question, action);
+              await fillCourseField(page, question, action, logger);
               // Fill any subfields generically from template definition
               if (question.config && question.config.fields) {
-                await fillSubfieldsFromConfig(page, question, action);
+                await fillSubfieldsFromConfig(page, question, action, logger);
               }
             }
             processedFields.add(question.qid);
           } else {
             // Check if this field was already processed by nested field logic
             if (processedFields.has(question.qid)) {
-              console.log(`⏭️ Skipping ${question.qid} - already processed as part of nested structure`);
+              logger.log(`⏭️ Skipping ${question.qid} - already processed as part of nested structure`);
               continue;
             }
 
-            await fillCourseField(page, question, action);
+            await fillCourseField(page, question, action, logger);
           }
           await page.waitForTimeout(150); // Reduced delay between field fills
         } catch (error) {
@@ -1146,30 +1148,30 @@ async function fillCourseTemplate(page, schoolId, action = 'updateCourse') {
             error.message.includes('Page closed') ||
             error.message.includes('Context closed')) {
             pageErrorCount++;
-            console.log(`⚠️ Page/context error ${pageErrorCount}/${maxPageErrors}: ${error.message}`);
+            logger.log(`⚠️ Page/context error ${pageErrorCount}/${maxPageErrors}: ${error.message}`);
 
             if (pageErrorCount >= maxPageErrors) {
-              console.log(`❌ Too many page errors, stopping course template fill`);
+              logger.log(`❌ Too many page errors, stopping course template fill`);
               throw new Error(`Page became unstable after ${pageErrorCount} errors`);
             }
           } else {
-            console.log(`⚠️ Field error for ${questionKey}: ${error.message}`);
+            logger.log(`⚠️ Field error for ${questionKey}: ${error.message}`);
           }
         }
       }
 
       // Log summary of processed fields
-      console.log(`\n📊 Field Processing Summary:`);
-      console.log(`   ┣ Total fields in template: ${questionKeys.length}`);
-      console.log(`   ┣ Fields processed: ${processedFields.size}`);
-      console.log(`   ┗ Processed fields: ${Array.from(processedFields).join(', ')}`);
+      logger.log(`\n📊 Field Processing Summary:`);
+      logger.log(`   ┣ Total fields in template: ${questionKeys.length}`);
+      logger.log(`   ┣ Fields processed: ${processedFields.size}`);
+      logger.log(`   ┗ Processed fields: ${Array.from(processedFields).join(', ')}`);
 
       // Clear the processed fields tracker
       global.sessionProcessedFields = null;
     }
 
   } catch (error) {
-    console.error('❌ Error filling course template:', error.message);
+    logger.error('❌ Error filling course template:', error.message);
     throw error;
   }
 }
@@ -1186,11 +1188,11 @@ async function dismissVisibleTooltips(page) {
  * Detect and dismiss the unsaved-changes warning modal if it is present.
  * Safely clicks "GO BACK TO EDITING" to continue editing.
  */
-async function dismissUnsavedChangesModal(page) {
+async function dismissUnsavedChangesModal(page, logger: ILogger) {
   try {
     const modal = page.locator('.stacked.modal, [role="dialog"]:has-text("Warning!")').first();
     if ((await modal.count()) > 0 && await modal.isVisible().catch(() => false)) {
-      console.log('   ┣ ⚠️ Unsaved-changes modal detected — dismissing (Go Back To Editing)');
+      logger.log('   ┣ ⚠️ Unsaved-changes modal detected — dismissing (Go Back To Editing)');
       const goBack = modal.locator('button:has-text("GO BACK TO EDITING"), button:has-text("Go Back To Editing"), button.btn-outline-primary');
       if ((await goBack.count()) > 0 && await goBack.first().isVisible().catch(() => false)) {
         await goBack.first().click({ timeout: 3000 }).catch(() => { });
@@ -1212,53 +1214,53 @@ async function dismissUnsavedChangesModal(page) {
  * @param {Object} question - Question configuration with nested credit fields
  * @param {string} action - Action type ('updateCourse' or 'inactivateCourse')
  */
-async function fillNestedCreditFields(page, question, action = 'updateCourse') {
+async function fillNestedCreditFields(page, question, action = 'updateCourse', logger: ILogger) {
   try {
-    console.log(`🏦  Processing nested credit field: ${question.qid}`);
+    logger.log(`🏦  Processing nested credit field: ${question.qid}`);
 
     if (!question.config || !question.config.fields) {
-      console.log(`⚠️ No nested fields found in credits configuration`);
+      logger.log(`⚠️ No nested fields found in credits configuration`);
       return;
     }
 
     const creditFieldsConfig = question.config.fields;
-    console.log(`📋 Found ${Object.keys(creditFieldsConfig).length} credit field types: ${Object.keys(creditFieldsConfig).join(', ')}`);
+    logger.log(`📋 Found ${Object.keys(creditFieldsConfig).length} credit field types: ${Object.keys(creditFieldsConfig).join(', ')}`);
 
     // Track chosen values to keep relationships consistent (e.g., min <= max)
     const chosenValuesByType = {};
 
     // Process each credit field type (creditHours, contactHours, billingHours, etc.)
     for (const [fieldType, fieldConfig] of Object.entries(creditFieldsConfig)) {
-      console.log(`\n🔍  Processing ${fieldType} field...`);
+      logger.log(`\n🔍  Processing ${fieldType} field...`);
 
       // Skip hidden fields
-      if (fieldConfig.hidden) {
-        console.log(`   ⏭️ Skipping hidden field: ${fieldType}`);
+      if ((fieldConfig as unknown as any).hidden) {
+        logger.log(`   ⏭️ Skipping hidden field: ${fieldType}`);
         continue;
       }
 
       // Skip fields with restricted role visibility
-      if (fieldConfig.rolesAllowedToSee && Array.isArray(fieldConfig.rolesAllowedToSee) && fieldConfig.rolesAllowedToSee.length === 0) {
-        console.log(`   ⏭️ Skipping field with restricted visibility: ${fieldType}`);
+      if ((fieldConfig as unknown as any).rolesAllowedToSee && Array.isArray((fieldConfig as unknown as any).rolesAllowedToSee) && (fieldConfig as unknown as any).rolesAllowedToSee.length === 0) {
+        logger.log(`   ⏭️ Skipping field with restricted visibility: ${fieldType}`);
         continue;
       }
 
       // Process nested subfields (min, max, value, operator) if they exist
-      if (fieldConfig.fields && typeof fieldConfig.fields === 'object') {
-        console.log(`   📋 Found ${Object.keys(fieldConfig.fields).length} subfields in ${fieldType}: ${Object.keys(fieldConfig.fields).join(', ')}`);
+      if ((fieldConfig as unknown as any).fields && typeof (fieldConfig as unknown as any).fields === 'object') {
+        logger.log(`   📋 Found ${Object.keys((fieldConfig as unknown as any).fields).length} subfields in ${fieldType}: ${Object.keys((fieldConfig as unknown as any).fields).join(', ')}`);
 
-        for (const [subFieldKey, subFieldConfig] of Object.entries(fieldConfig.fields)) {
-          console.log(`\n   🔍 Processing ${fieldType}.${subFieldKey}...`);
+        for (const [subFieldKey, subFieldConfig] of Object.entries((fieldConfig as unknown as any).fields)) {
+          logger.log(`\n   🔍 Processing ${fieldType}.${subFieldKey}...`);
 
           // Skip hidden subfields
-          if (subFieldConfig.hidden) {
-            console.log(`      ⏭️ Skipping hidden subfield: ${fieldType}.${subFieldKey}`);
+          if ((subFieldConfig as unknown as any).hidden) {
+            logger.log(`      ⏭️ Skipping hidden subfield: ${fieldType}.${subFieldKey}`);
             continue;
           }
 
           // Skip subfields with restricted role visibility
-          if (subFieldConfig.rolesAllowedToSee && Array.isArray(subFieldConfig.rolesAllowedToSee) && subFieldConfig.rolesAllowedToSee.length === 0) {
-            console.log(`      ⏭️ Skipping subfield with restricted visibility: ${fieldType}.${subFieldKey}`);
+          if ((subFieldConfig as unknown as any).rolesAllowedToSee && Array.isArray((subFieldConfig as unknown as any).rolesAllowedToSee) && (subFieldConfig as unknown as any).rolesAllowedToSee.length === 0) {
+            logger.log(`      ⏭️ Skipping subfield with restricted visibility: ${fieldType}.${subFieldKey}`);
             continue;
           }
 
@@ -1267,19 +1269,19 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
           const subFieldQuestion = {
             qid: `${parentField}.${fieldType}.${subFieldKey}`,
             dataKey: `${parentField}.${fieldType}.${subFieldKey}`,
-            label: subFieldConfig.label || `${fieldType} ${subFieldKey}`,
-            questionType: subFieldConfig.inputType || 'text',
-            type: subFieldConfig.inputType || 'text',
-            isVisibleInForm: !subFieldConfig.hidden,
-            hidden: subFieldConfig.hidden || false,
-            required: subFieldConfig.required || false,
-            description: subFieldConfig.description || '',
+            label: (subFieldConfig as unknown as any).label || `${fieldType} ${subFieldKey}`,
+            questionType: (subFieldConfig as unknown as any).inputType || 'text',
+            type: (subFieldConfig as unknown as any).inputType || 'text',
+            isVisibleInForm: !(subFieldConfig as unknown as any).hidden,
+            hidden: (subFieldConfig as unknown as any).hidden || false,
+            required: (subFieldConfig as unknown as any).required || false,
+            description: (subFieldConfig as unknown as any).description || '',
             originalParentField: parentField, // Track top-level parent (e.g., "credits")
             originalFieldType: fieldType, // Track parent field
             originalSubFieldKey: subFieldKey // Track subfield key
           };
 
-          console.log(`      📝 Created subfield question: ${subFieldQuestion.qid} (${subFieldQuestion.questionType})`);
+          logger.log(`      📝 Created subfield question: ${subFieldQuestion.qid} (${subFieldQuestion.questionType})`);
 
           try {
             // Compute a value with awareness of min/max ordering
@@ -1306,7 +1308,7 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
               }
             }
 
-            await fillCourseField(page, subFieldQuestion, action);
+            await fillCourseField(page, subFieldQuestion, action, logger);
             // If numeric, re-target the numeric input and sanitize with the intended value
             if ((subFieldQuestion.questionType === 'number' || subFieldKey === 'min' || subFieldKey === 'max' || subFieldKey === 'value')) {
               try {
@@ -1322,41 +1324,41 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
                   const candidate = page.locator(sel).first();
                   if (await candidate.count() > 0) {
                     numericInput = candidate;
-                    console.log(`      ┣ ✅ Found ${parentField}.${fieldType}.${subFieldKey} via: ${sel}`);
+                    logger.log(`      ┣ ✅ Found ${parentField}.${fieldType}.${subFieldKey} via: ${sel}`);
                     break;
                   }
                 }
 
                 if (numericInput) {
                   const fillVal = intendedValue !== null ? intendedValue : '1';
-                  await fillNumberField(page, numericInput, fillVal);
+                  await fillNumberField(page, numericInput, fillVal, logger);
                 }
               } catch (_) { }
             }
             await page.waitForTimeout(150); // Small delay between subfield fills
           } catch (subFieldError) {
-            console.log(`      ⚠️ Error filling subfield ${fieldType}.${subFieldKey}: ${subFieldError.message}`);
+            logger.log(`      ⚠️ Error filling subfield ${fieldType}.${subFieldKey}: ${subFieldError.message}`);
           }
         }
       } else {
         // Handle the field itself if it doesn't have nested subfields
-        console.log(`   📝 Processing ${fieldType} as single field...`);
+        logger.log(`   📝 Processing ${fieldType} as single field...`);
 
         const fieldQuestion = {
           qid: fieldType,
           dataKey: fieldType,
-          label: fieldConfig.label || fieldType,
-          questionType: fieldConfig.inputType || 'text',
-          type: fieldConfig.inputType || 'text',
-          isVisibleInForm: !fieldConfig.hidden,
-          hidden: fieldConfig.hidden || false,
-          required: fieldConfig.required || false,
-          description: fieldConfig.description || '',
+          label: (fieldConfig as unknown as any).label || fieldType,
+          questionType: (fieldConfig as unknown as any).inputType || 'text',
+          type: (fieldConfig as unknown as any).inputType || 'text',
+          isVisibleInForm: !(fieldConfig as unknown as any).hidden,
+          hidden: (fieldConfig as unknown as any).hidden || false,
+          required: (fieldConfig as unknown as any).required || false,
+          description: (fieldConfig as unknown as any).description || '',
           originalFieldType: fieldType // Track parent field
         };
 
         try {
-          await fillCourseField(page, fieldQuestion, action);
+          await fillCourseField(page, fieldQuestion, action, logger);
           // If numeric, re-target the numeric input and sanitize
           if (fieldQuestion.questionType === 'number') {
             try {
@@ -1364,21 +1366,21 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
               const numericInput = page.locator(idLike).first();
               if (await numericInput.count() > 0) {
                 const safeVal = String(generateCourseTestValue({ questionType: 'number', qid: `${fieldType}`, originalFieldType: fieldType }));
-                await fillNumberField(page, numericInput, safeVal);
+                await fillNumberField(page, numericInput, safeVal, logger);
               }
             } catch (_) { }
           }
           await page.waitForTimeout(200); // Small delay between field fills
         } catch (fieldError) {
-          console.log(`   ⚠️ Error filling field ${fieldType}: ${fieldError.message}`);
+          logger.log(`   ⚠️ Error filling field ${fieldType}: ${fieldError.message}`);
         }
       }
     }
 
-    console.log(`✅  Completed processing nested credit field: ${question.qid}`);
+    logger.log(`✅  Completed processing nested credit field: ${question.qid}`);
 
   } catch (error) {
-    console.log(`❌  Error processing nested credit field ${question.qid}: ${error.message}`);
+    logger.log(`❌  Error processing nested credit field ${question.qid}: ${error.message}`);
   }
 }
 
@@ -1388,7 +1390,7 @@ async function fillNestedCreditFields(page, question, action = 'updateCourse') {
  * @param {Object} question - Question configuration from template
  * @param {string} action - Action type ('updateCourse' or 'inactivateCourse')
  */
-async function fillCourseField(page, question, action = 'updateCourse') {
+async function fillCourseField(page, question, action = 'updateCourse', logger: ILogger) {
   try {
     if (!question.qid || question.hidden || !question.isVisibleInForm) {
       try {
@@ -1398,7 +1400,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
           if (!global.__courseDiffSkipFields.includes(topLevel)) {
             global.__courseDiffSkipFields.push(topLevel);
           }
-          recordSkipReason(topLevel, `Skipped: Field set to be skipped for test case: ${action}`);
+          recordSkipReason(topLevel, `Skipped: Field set to be skipped for test case: ${action}`, logger);
         }
       } catch (_) { }
       return; // Skip hidden, disabled or invisible questions
@@ -1409,7 +1411,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
 
     // Check if this specific questionId was already processed
     if (processedFields.has(question.qid)) {
-      console.log(`⏭️ Skipping ${question.qid} - already processed to prevent duplicate filling`);
+      logger.log(`⏭️ Skipping ${question.qid} - already processed to prevent duplicate filling`);
       return;
     }
 
@@ -1432,21 +1434,21 @@ async function fillCourseField(page, question, action = 'updateCourse') {
 
     // Always skip certain fields regardless of action, BUT allow inactivation/revision overrides
     if (alwaysSkipFields.includes(question.qid) && !isInactivationField && !isRevisionField) {
-      console.log(`⏭️ Skipping always-protected field: ${question.qid}`);
+      logger.log(`⏭️ Skipping always-protected field: ${question.qid}`);
       try {
         const topLevel = String(question.qid).split('.')[0];
         if (!global.__courseDiffSkipFields) global.__courseDiffSkipFields = [];
         if (!global.__courseDiffSkipFields.includes(topLevel)) {
           global.__courseDiffSkipFields.push(topLevel);
         }
-        recordSkipReason(topLevel, `Skipped: Field set to be skipped for test case: ${action}`);
+        recordSkipReason(topLevel, `Skipped: Field set to be skipped for test case: ${action}`, logger);
       } catch (_) { }
       return;
     }
 
     // Skip fields based on action type
     if (skipFields.includes(question.qid) && !isInactivationField && !isRevisionField && !(isCreationAction && creationAllowedFields.includes(question.qid))) {
-      console.log(`⏭️ Skipping protected field: ${question.qid}`);
+      logger.log(`⏭️ Skipping protected field: ${question.qid}`);
       try {
         // Mark top-level qid as skipped for diff table
         const topLevel = String(question.qid).split('.')[0];
@@ -1454,66 +1456,66 @@ async function fillCourseField(page, question, action = 'updateCourse') {
         if (!global.__courseDiffSkipFields.includes(topLevel)) {
           global.__courseDiffSkipFields.push(topLevel);
         }
-        try { recordSkipReason(topLevel, `Skipped: Field set to be skipped for test case: ${action}`); } catch (_) { }
+        try { recordSkipReason(topLevel, `Skipped: Field set to be skipped for test case: ${action}`, logger); } catch (_) { }
       } catch (_) { }
       return;
     }
 
     // Debug logging for field protection logic
     if (skipFields.includes(question.qid)) {
-      console.log(`   ┣ 🔒 Field ${question.qid} is in skipFields list`);
-      console.log(`   ┣ ┣ isInactivationField: ${isInactivationField}`);
-      console.log(`   ┣ ┣ isRevisionField: ${isRevisionField}`);
-      console.log(`   ┣ ┣ isCreationAction: ${isCreationAction}`);
-      console.log(`   ┣ ┣ creationAllowedFields.includes(${question.qid}): ${creationAllowedFields.includes(question.qid)}`);
-      console.log(`   ┣ ┗ Will skip: ${skipFields.includes(question.qid) && !isInactivationField && !isRevisionField && !(isCreationAction && creationAllowedFields.includes(question.qid))}`);
+      logger.log(`   ┣ 🔒 Field ${question.qid} is in skipFields list`);
+      logger.log(`   ┣ ┣ isInactivationField: ${isInactivationField}`);
+      logger.log(`   ┣ ┣ isRevisionField: ${isRevisionField}`);
+      logger.log(`   ┣ ┣ isCreationAction: ${isCreationAction}`);
+      logger.log(`   ┣ ┣ creationAllowedFields.includes(${question.qid}): ${creationAllowedFields.includes(question.qid)}`);
+      logger.log(`   ┣ ┗ Will skip: ${skipFields.includes(question.qid) && !isInactivationField && !isRevisionField && !(isCreationAction && creationAllowedFields.includes(question.qid))}`);
     }
 
     // Log special handling for specific action fields
     if (isInactivationField) {
-      console.log(`🔄 [Inactivation] Processing inactivation-specific field: ${question.qid}`);
+      logger.log(`🔄 [Inactivation] Processing inactivation-specific field: ${question.qid}`);
     } else if (isRevisionField) {
-      console.log(`🔄 [Revision] Processing revision-specific field: ${question.qid}`);
+      logger.log(`🔄 [Revision] Processing revision-specific field: ${question.qid}`);
     } else if (isCreationAction) {
-      console.log(`🔄 [Creation] Processing creation field: ${question.qid}`);
+      logger.log(`🔄 [Creation] Processing creation field: ${question.qid}`);
     }
 
-    console.log(`🔍 Looking for field: ${question.qid} (${question.label})`);
-    console.log(`   ┣ Question type: ${question.questionType || question.type}`);
-    console.log(`   ┣ Question ID: ${question.qid}`);
-    console.log(`   ┣ Data key: ${question.dataKey}`);
+    logger.log(`🔍 Looking for field: ${question.qid} (${question.label})`);
+    logger.log(`   ┣ Question type: ${question.questionType || question.type}`);
+    logger.log(`   ┣ Question ID: ${question.qid}`);
+    logger.log(`   ┣ Data key: ${question.dataKey}`);
 
     // Skip proactive tooltip dismissal for performance; handled only on blockage
     // If an unsaved-changes modal is present at any time, dismiss it proactively
-    try { await dismissUnsavedChangesModal(page); } catch (_) { }
+    try { await dismissUnsavedChangesModal(page, logger); } catch (_) { }
 
     // Special handling for inactivateCourse action
     if (action === 'inactivateCourse') {
       if (question.qid === 'status') {
-        return await handleCourseStatusInactivation(page, question);
+        return await handleCourseStatusInactivation(page, question, logger);
       } else if (question.qid === 'effectiveEndDate') {
-        return await handleEffectiveEndDateInactivation(page, question);
+        return await handleEffectiveEndDateInactivation(page, question, logger);
       }
     }
 
     // Special handling for newCourseRevision action
     if (action === 'newCourseRevision') {
       if (question.qid === 'effectiveStartDate') {
-        return await handleEffectiveStartDateRevision(page, question);
+        return await handleEffectiveStartDateRevision(page, question, logger);
       }
     }
 
     // Special handling for createCourse action
     if (action === 'createCourse') {
       if (question.qid === 'status') {
-        return await handleCourseStatusCreation(page, question);
+        return await handleCourseStatusCreation(page, question, logger);
       } else if (question.qid === 'effectiveStartDate') {
-        return await handleEffectiveStartDateCreation(page, question);
+        return await handleEffectiveStartDateCreation(page, question, logger);
       } else if (question.qid === 'effectiveEndDate' || question.qid === 'crsApprovalDate' || question.qid === 'crsStatusDate') {
-        return await handleDateFieldCreation(page, question);
+        return await handleDateFieldCreation(page, question, logger);
       } else if (question.qid === 'subjectCode' || question.qid === 'courseNumber') {
         // These fields should be filled during course creation
-        console.log(`🔄 [Creation] Processing ${question.qid} field for course creation...`);
+        logger.log(`🔄 [Creation] Processing ${question.qid} field for course creation...`);
         // Continue with normal field filling logic
       }
     }
@@ -1531,7 +1533,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
       const midField = question.originalFieldType; // e.g., "creditHours"
       const leafField = question.originalSubFieldKey; // e.g., "min"
 
-      console.log(`   ┣ 🏦  Processing triple-nested field: ${topParent}.${midField}.${leafField}`);
+      logger.log(`   ┣ 🏦  Processing triple-nested field: ${topParent}.${midField}.${leafField}`);
 
       // Add high-priority selectors for nested structure matching actual HTML: id="field-credits.creditHours.min"
       dataTestSelectors.push(
@@ -1573,7 +1575,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
           `#field-${question.qid} .editor__content [contenteditable="true"]`,
           `[id="field-${question.qid}"] [contenteditable="true"]`
         );
-        console.log(`   ┣ 📝 Added WYSIWYG selectors for ${question.qid}`);
+        logger.log(`   ┣ 📝 Added WYSIWYG selectors for ${question.qid}`);
       }
     } catch (_) { }
 
@@ -1587,7 +1589,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
         if (isVisible && isEnabled) {
           fieldElement = element;
           fieldStrategy = `data-test: ${selector}`;
-          console.log(`   ┣ ✅ Field "${question.qid}" found via selector: ${selector}`);
+          logger.log(`   ┣ ✅ Field "${question.qid}" found via selector: ${selector}`);
           break;
         }
       }
@@ -1596,18 +1598,18 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     // (Removed generic fallback to prevent writing to wrong fields)
 
     if (!fieldElement) {
-      console.log(`   ┗ ❌ Could not find field: ${question.qid} (${question.label})`);
+      logger.log(`   ┗ ❌ Could not find field: ${question.qid} (${question.label})`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found field using: ${fieldStrategy}`);
+    logger.log(`   ┗ ✅ Found field using: ${fieldStrategy}`);
 
     // IMPORTANT: Determine actual field type based on the found element, not assumptions
     const foundElementTagName = await fieldElement.evaluate(el => el.tagName.toLowerCase()).catch(() => 'unknown');
     const foundElementClass = await fieldElement.getAttribute('class') || '';
     const foundElementType = await fieldElement.getAttribute('type') || '';
 
-    console.log(`   ┣ 🔍 Found element analysis: tag=${foundElementTagName}, class="${foundElementClass}", type="${foundElementType}"`);
+    logger.log(`   ┣ 🔍 Found element analysis: tag=${foundElementTagName}, class="${foundElementClass}", type="${foundElementType}"`);
 
     // ULTIMATE SAFETY CHECK: Never allow critical multiselect fields to go through regular field logic
     const criticalMultiselectFields = ['departments', 'attributes'];
@@ -1615,7 +1617,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
       // For update flows we DO want to modify these; only skip in non-update flows.
       const shouldSkipForSafety = action !== 'updateCourse' && action !== 'createCourse' && action !== 'newCourseRevision';
       if (shouldSkipForSafety) {
-        console.log(`   ┣ 🚨 ${question.qid} field detected and action=${action}, skipping to avoid breaking existing data`);
+        logger.log(`   ┣ 🚨 ${question.qid} field detected and action=${action}, skipping to avoid breaking existing data`);
         return;
       }
       // Fall through and handle as a normal multiselect (no early return)
@@ -1632,7 +1634,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
       const contentEditable = await fieldElement.locator('[contenteditable="true"]').first();
       if (await contentEditable.count() > 0) {
         fieldElement = contentEditable;
-        console.log(`   ┣ ✅ Using contenteditable for WYSIWYG field`);
+        logger.log(`   ┣ ✅ Using contenteditable for WYSIWYG field`);
       } else {
         // If the found element itself is contenteditable, keep as is
         try {
@@ -1642,7 +1644,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
             const alt = fieldElement.locator('.editor__content [contenteditable="true"]').first();
             if (await alt.count() > 0) {
               fieldElement = alt;
-              console.log(`   ┣ ✅ Refined to editor content area`);
+              logger.log(`   ┣ ✅ Refined to editor content area`);
             }
           }
         } catch (_) { }
@@ -1650,20 +1652,20 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     } else if (foundElementClass.includes('multiselect__input')) {
       // This is definitely a multiselect input
       isMultiselect = true;
-      console.log(`   ┣ ✅ Confirmed multiselect: element has multiselect__input class`);
+      logger.log(`   ┣ ✅ Confirmed multiselect: element has multiselect__input class`);
     } else if (foundElementClass.includes('form-control') && foundElementTagName === 'input') {
       // This is a regular form input
       isMultiselect = false;
-      console.log(`   ┣ ✅ Confirmed regular input: element has form-control class and is input tag`);
+      logger.log(`   ┣ ✅ Confirmed regular input: element has form-control class and is input tag`);
     } else if (foundElementTagName === 'input' && (foundElementType === 'text' || foundElementType === 'number')) {
       // Regular text or number input
       isMultiselect = false;
-      console.log(`   ┣ ✅ Confirmed regular input: element is ${foundElementType} input`);
+      logger.log(`   ┣ ✅ Confirmed regular input: element is ${foundElementType} input`);
     } else {
       // Fallback: check if parent has multiselect structure
       const parentMultiselect = await fieldElement.locator('..').locator('.multiselect, [class*="multiselect"]').count() > 0;
       isMultiselect = parentMultiselect;
-      console.log(`   ┣ 🔍 Fallback check: parent multiselect=${parentMultiselect}`);
+      logger.log(`   ┣ 🔍 Fallback check: parent multiselect=${parentMultiselect}`);
     }
 
     // Check for Yes/No buttons
@@ -1671,46 +1673,46 @@ async function fillCourseField(page, question, action = 'updateCourse') {
 
     // Override logic for specific fields that we know should NOT be multiselects
     if (isMultiselect && (question.qid === 'courseNumber' || question.qid === 'name' || question.qid === 'longName' || question.qid === 'prerequisiteCode')) {
-      console.log(`   ┣ 🔢 Override: ${question.qid} should be regular input, not multiselect`);
+      logger.log(`   ┣ 🔢 Override: ${question.qid} should be regular input, not multiselect`);
 
       // Force these to be treated as regular inputs
       isMultiselect = false;
-      console.log(`   ┣ ✅ ${question.qid} forced to regular input mode`);
+      logger.log(`   ┣ ✅ ${question.qid} forced to regular input mode`);
     }
 
-    console.log(`   ┣ 🔍 Field type analysis: isMultiselect=${isMultiselect}, isYesNoButtons=${isYesNoButtons}, qid=${question.qid}`);
+    logger.log(`   ┣ 🔍 Field type analysis: isMultiselect=${isMultiselect}, isYesNoButtons=${isYesNoButtons}, qid=${question.qid}`);
 
     // SPECIAL SAFETY CHECK: Always treat known multiselect fields as multiselect regardless of DOM structure
     const knownMultiselectFields = ['departments', 'attributes', 'gradeModes', 'subjectCode'];
     if (knownMultiselectFields.includes(question.qid)) {
-      console.log(`   ┣ 🔒 Special safety check: ${question.qid} field detected, forcing multiselect handling...`);
+      logger.log(`   ┣ 🔒 Special safety check: ${question.qid} field detected, forcing multiselect handling...`);
 
       // For subjectCode, make sure we have the right element (could be wrapper or input)
       if (question.qid === 'subjectCode') {
         const wrapper = fieldElement.locator('..').locator('.multiselect').first();
         if (await wrapper.count() > 0) {
-          console.log(`   ┣ 📝 Using multiselect wrapper for subjectCode`);
+          logger.log(`   ┣ 📝 Using multiselect wrapper for subjectCode`);
           fieldElement = wrapper;
         }
       }
 
-      await fillMultiselectDropdown(page, fieldElement, question);
+      await fillMultiselectDropdown(page, fieldElement, question, undefined, logger);
       return; // Exit early for known multiselect fields
     }
 
     // Handle multiselect fields immediately (no test value needed)
     if (isMultiselect) {
-      console.log(`   ┣ Detected multiselect field, selecting from dropdown options...`);
+      logger.log(`   ┣ Detected multiselect field, selecting from dropdown options...`);
       // If a warning modal is open, dismiss before interacting
-      await dismissUnsavedChangesModal(page).catch(() => { });
-      await fillMultiselectDropdown(page, fieldElement, question, action);
+      await dismissUnsavedChangesModal(page, logger).catch(() => { });
+      await fillMultiselectDropdown(page, fieldElement, question, action, logger);
       return; // Exit early for multiselect fields
     }
 
     // Handle Yes/No button fields immediately (no test value needed)
     if (isYesNoButtons) {
-      console.log(`   ┣ Detected Yes/No button field, selecting opposite value...`);
-      await fillYesNoButtons(page, fieldElement, question);
+      logger.log(`   ┣ Detected Yes/No button field, selecting opposite value...`);
+      await fillYesNoButtons(page, fieldElement, question, logger);
       return; // Exit early for button fields
     }
 
@@ -1720,10 +1722,10 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     let originalValue = null;
     if (hadValueBefore) {
       originalValue = await getFieldValue(fieldElement, question);
-      console.log(`   ┗ 📝 Captured original value for ${question.qid}: ${JSON.stringify(originalValue)}`);
+      logger.log(`   ┗ 📝 Captured original value for ${question.qid}: ${JSON.stringify(originalValue)}`);
     }
     const tCapture = Date.now() - tCapture0;
-    if (tCapture > 500) console.log(`   ┗ ⏱️ Value capture took ${tCapture}ms`);
+    if (tCapture > 500) logger.log(`   ┗ ⏱️ Value capture took ${tCapture}ms`);
 
     // Short-circuit if a field looks like it's stuck loading, but try to recover first
     {
@@ -1737,10 +1739,10 @@ async function fillCourseField(page, question, action = 'updateCourse') {
         looksLoading = await checkFieldIsLoading(page, fieldElement);
       }
       const tLoad = Date.now() - tLoad0;
-      if (tLoad > 500) console.log(`   ┗ ⏱️ Loading-check took ${tLoad}ms`);
+      if (tLoad > 500) logger.log(`   ┗ ⏱️ Loading-check took ${tLoad}ms`);
       if (looksLoading) {
-        console.log(`   ┗ ⏭️ Still blocked after retry, skipping: ${question.qid}`);
-        recordSkipReason(question.qid, 'Skipped: field blocked by overlay');
+        logger.log(`   ┗ ⏭️ Still blocked after retry, skipping: ${question.qid}`);
+        recordSkipReason(question.qid, 'Skipped: field blocked by overlay', logger);
         return;
       }
     }
@@ -1750,7 +1752,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
       try {
         const maxLenConfigured = getConfiguredMaxLength(question);
         if (maxLenConfigured && typeof originalValue === 'string' && originalValue.trim().length >= maxLenConfigured) {
-          console.log(`   ┗ 🛑 Existing value at/over maxLength(${maxLenConfigured}); skipping modification to avoid validation error`);
+          logger.log(`   ┗ 🛑 Existing value at/over maxLength(${maxLenConfigured}); skipping modification to avoid validation error`);
           return;
         }
       } catch (_) { }
@@ -1759,17 +1761,17 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     // Generate test value only for regular fields
     const existingValue = hadValueBefore ? originalValue : null;
     let testValue = generateCourseTestValue(question, existingValue);
-    console.log(`   ┣ 📝 Generated test value for ${question.qid}: ${JSON.stringify(testValue)}`);
+    logger.log(`   ┣ 📝 Generated test value for ${question.qid}: ${JSON.stringify(testValue)}`);
 
     // Sanitize numeric values to avoid accidental exponent characters
     let finalTestValue = testValue;
     if ((question.questionType || question.type) === 'number') {
       const match = String(testValue).match(/-?\d+(?:\.\d+)?/);
       finalTestValue = match ? match[0] : '1';
-      console.log(`   ┣ 🔢 Sanitized number value: ${JSON.stringify(testValue)} → "${finalTestValue}"`);
+      logger.log(`   ┣ 🔢 Sanitized number value: ${JSON.stringify(testValue)} → "${finalTestValue}"`);
     }
     if (!testValue && testValue !== false && testValue !== 0) {
-      console.log(`   ┗ ⏭️ No test value generated for: ${question.qid}`);
+      logger.log(`   ┗ ⏭️ No test value generated for: ${question.qid}`);
       return;
     }
 
@@ -1793,32 +1795,32 @@ async function fillCourseField(page, question, action = 'updateCourse') {
           testValue = base.slice(0, maxLen);
         }
         finalTestValue = testValue;
-        console.log(`   ┗ ✂️ Clamped value to maxLength(${maxLen}): ${finalTestValue}`);
+        logger.log(`   ┗ ✂️ Clamped value to maxLength(${maxLen}): ${finalTestValue}`);
       }
     } catch (_) { }
     const tClamp = Date.now() - tClamp0;
-    if (tClamp > 300) console.log(`   ┗ ⏱️ MaxLength resolution took ${tClamp}ms`);
+    if (tClamp > 300) logger.log(`   ┗ ⏱️ MaxLength resolution took ${tClamp}ms`);
 
-    console.log(`   ┗ 📝 Filling with: ${finalTestValue}`);
+    logger.log(`   ┗ 📝 Filling with: ${finalTestValue}`);
 
     // Check if page is still active before filling
     try {
       await page.waitForTimeout(100); // Small delay to ensure stability
       const isPageActive = await page.evaluate(() => !document.hidden).catch(() => false);
       if (!isPageActive) {
-        console.log(`   ┗ ⚠️ Page is not active, skipping field fill`);
+        logger.log(`   ┗ ⚠️ Page is not active, skipping field fill`);
         return;
       }
     } catch (pageError) {
-      console.log(`   ┗ ⚠️ Page check failed, skipping field: ${pageError.message}`);
+      logger.log(`   ┗ ⚠️ Page check failed, skipping field: ${pageError.message}`);
       return;
     }
 
     // Fill the field based on its type for non-multiselect/button fields
     const tFill0 = Date.now();
-    await fillFieldByType(page, fieldElement, question, finalTestValue);
+    await fillFieldByType(page, fieldElement, question, finalTestValue, logger);
     const tFill = Date.now() - tFill0;
-    if (tFill > 700) console.log(`   ┗ ⏱️ Filling took ${tFill}ms for ${question.qid}`);
+    if (tFill > 700) logger.log(`   ┗ ⏱️ Filling took ${tFill}ms for ${question.qid}`);
 
     // Verify value changed; if not, try an alternate deterministic value
     try {
@@ -1830,7 +1832,7 @@ async function fillCourseField(page, question, action = 'updateCourse') {
         const beforeStr = originalValue == null ? '' : String(originalValue).trim();
         const afterStr = afterValue == null ? '' : String(afterValue).trim();
         if (beforeStr === afterStr) {
-          console.log(`   ┗ ⚠️ Value did not change for ${question.qid}, attempting alternate value`);
+          logger.log(`   ┗ ⚠️ Value did not change for ${question.qid}, attempting alternate value`);
           let alternate = finalTestValue;
           if (typeof finalTestValue === 'string') {
             alternate = finalTestValue.replace(/(?:-\s*CDtest\d*)?$/i, '') + '-CDtest2';
@@ -1839,27 +1841,27 @@ async function fillCourseField(page, question, action = 'updateCourse') {
           } else if (typeof finalTestValue === 'boolean') {
             alternate = !finalTestValue;
           }
-          await fillFieldByType(page, fieldElement, question, alternate);
+          await fillFieldByType(page, fieldElement, question, alternate, logger);
         }
         const tVerify = Date.now() - tVerify0;
-        if (tVerify > 500) console.log(`   ┗ ⏱️ Verification took ${tVerify}ms for ${question.qid}`);
+        if (tVerify > 500) logger.log(`   ┗ ⏱️ Verification took ${tVerify}ms for ${question.qid}`);
       }
     } catch (_) { }
 
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling field ${question.qid}: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling field ${question.qid}: ${error.message}`);
   }
 }
 
 /**
  * Fill a text field
  */
-async function fillTextField(page, fieldElement, value) {
+async function fillTextField(page, fieldElement, value, logger: ILogger) {
   try {
     // First check if the field is visible
     const isVisible = await fieldElement.isVisible().catch(() => false);
     if (!isVisible) {
-      console.log(`   ┣ 👁️ Text field not visible, attempting to make it visible...`);
+      logger.log(`   ┣ 👁️ Text field not visible, attempting to make it visible...`);
 
       // Try to scroll the element into view
       await fieldElement.scrollIntoViewIfNeeded();
@@ -1875,7 +1877,7 @@ async function fillTextField(page, fieldElement, value) {
       // Check visibility again
       const isNowVisible = await fieldElement.isVisible().catch(() => false);
       if (!isNowVisible) {
-        console.log(`   ┣ ⚠️ Text field still not visible after attempts, trying force interaction...`);
+        logger.log(`   ┣ ⚠️ Text field still not visible after attempts, trying force interaction...`);
         // Continue anyway with force click
       }
     }
@@ -1884,7 +1886,7 @@ async function fillTextField(page, fieldElement, value) {
     await page.waitForTimeout(100);
     await fieldElement.fill(String(value));
   } catch (error) {
-    console.log(`   ┣ 🔄 Primary fill method failed: ${error.message.split('\n')[0]}, trying alternative approach...`);
+    logger.log(`   ┣ 🔄 Primary fill method failed: ${error.message.split('\n')[0]}, trying alternative approach...`);
     try {
       // Try alternative approach for text fields
       await fieldElement.click({ force: true, timeout: 5000 });
@@ -1892,15 +1894,15 @@ async function fillTextField(page, fieldElement, value) {
       await fieldElement.press('Control+a');
       await page.keyboard.type(String(value));
     } catch (alternativeError) {
-      console.log(`   ┣ ❌ Alternative fill method also failed: ${alternativeError.message.split('\n')[0]}`);
+      logger.log(`   ┣ ❌ Alternative fill method also failed: ${alternativeError.message.split('\n')[0]}`);
 
       // Last resort: try typing without clicking
       try {
         await fieldElement.press('Control+a');
         await page.keyboard.type(String(value));
-        console.log(`   ┣ ✅ Last resort keyboard typing succeeded`);
+        logger.log(`   ┣ ✅ Last resort keyboard typing succeeded`);
       } catch (keyboardError) {
-        console.log(`   ┣ ❌ All fill methods failed: ${keyboardError.message.split('\n')[0]}`);
+        logger.log(`   ┣ ❌ All fill methods failed: ${keyboardError.message.split('\n')[0]}`);
         throw keyboardError;
       }
     }
@@ -1959,9 +1961,9 @@ async function fillWysiwygField(page, fieldElement, value) {
 /**
  * Fill a number field
  */
-async function fillNumberField(page, fieldElement, value) {
+async function fillNumberField(page, fieldElement, value, logger: ILogger) {
   try {
-    console.log(`      🔢 fillNumberField called with value: ${JSON.stringify(value)}`);
+    logger.log(`      🔢 fillNumberField called with value: ${JSON.stringify(value)}`);
 
     // Ensure we operate on the actual input element
     let inputEl = fieldElement;
@@ -1983,7 +1985,7 @@ async function fillNumberField(page, fieldElement, value) {
     };
 
     const toFill = sanitizeNumber(value);
-    console.log(`      🔢 Sanitized value to fill: "${toFill}"`);
+    logger.log(`      🔢 Sanitized value to fill: "${toFill}"`);
 
     await inputEl.clear();
     await page.waitForTimeout(50);
@@ -1991,14 +1993,14 @@ async function fillNumberField(page, fieldElement, value) {
 
     // Verify no alpha characters snuck in; refix if needed
     const after = await inputEl.inputValue().catch(() => toFill);
-    console.log(`      🔢 Value after fill: "${after}"`);
+    logger.log(`      🔢 Value after fill: "${after}"`);
 
     if (/[a-zA-Z]/.test(after || '')) {
-      console.log(`      ⚠️ Detected alpha characters in number field, refilling...`);
+      logger.log(`      ⚠️ Detected alpha characters in number field, refilling...`);
       await inputEl.clear();
       await inputEl.fill(toFill);
       const afterRefix = await inputEl.inputValue().catch(() => toFill);
-      console.log(`      🔢 Value after refix: "${afterRefix}"`);
+      logger.log(`      🔢 Value after refix: "${afterRefix}"`);
     }
   } catch (error) {
     try {
@@ -2009,6 +2011,7 @@ async function fillNumberField(page, fieldElement, value) {
       };
       const toFill = sanitizeNumber(value);
       await fieldElement.click({ force: true });
+      // @ts-ignore
       await inputEl.press('Control+a');
       await page.keyboard.type(toFill);
     } catch (_) { }
@@ -2018,7 +2021,7 @@ async function fillNumberField(page, fieldElement, value) {
 /**
  * Fill a select/dropdown field (enhanced for course forms)
  */
-async function fillSelectField(page, fieldElement, value, question = null) {
+async function fillSelectField(page, fieldElement, value, question = null, logger: ILogger) {
   try {
     // Check if it's part of a multiselect component structure
     const parentDiv = fieldElement.locator('..');
@@ -2026,7 +2029,7 @@ async function fillSelectField(page, fieldElement, value, question = null) {
 
     if (await multiselect.count() > 0) {
       // This is a multiselect component
-      console.log(`   ┣ Detected multiselect component, checking if enabled...`);
+      logger.log(`   ┣ Detected multiselect component, checking if enabled...`);
 
       // Check if multiselect is disabled
       const isDisabled = await multiselect.getAttribute('class').then(className =>
@@ -2034,12 +2037,12 @@ async function fillSelectField(page, fieldElement, value, question = null) {
       ).catch(() => false);
 
       if (isDisabled) {
-        console.log(`   ┗ ⚠️ Multiselect is disabled, skipping: ${question.qid}`);
+        logger.log(`   ┗ ⚠️ Multiselect is disabled, skipping: ${question.qid}`);
         return;
       }
 
       try {
-        console.log(`   ┣ Clicking to open multiselect...`);
+        logger.log(`   ┣ Clicking to open multiselect...`);
 
         // Try clicking with multiple strategies in case of tooltip interference
         let clickSuccessful = false;
@@ -2058,23 +2061,23 @@ async function fillSelectField(page, fieldElement, value, question = null) {
 
         for (const strategy of clickStrategies) {
           try {
-            console.log(`   ┣ Trying ${strategy.name}...`);
+            logger.log(`   ┣ Trying ${strategy.name}...`);
             await strategy.action();
             clickSuccessful = true;
-            console.log(`   ┣ ✅ ${strategy.name} successful`);
+            logger.log(`   ┣ ✅ ${strategy.name} successful`);
             break;
           } catch (clickError) {
-            console.log(`   ┣ ❌ ${strategy.name} failed: ${clickError.message.split('\n')[0]}`);
+            logger.log(`   ┣ ❌ ${strategy.name} failed: ${clickError.message.split('\n')[0]}`);
             // If an unsaved-changes modal is present, dismiss it and retry next strategy
-            const dismissed = await dismissUnsavedChangesModal(page);
+            const dismissed = await dismissUnsavedChangesModal(page, logger);
             if (dismissed) {
-              console.log('   ┣ ✅ Dismissed warning modal, will retry next click strategy');
+              logger.log('   ┣ ✅ Dismissed warning modal, will retry next click strategy');
             }
           }
         }
 
         if (!clickSuccessful) {
-          console.log(`   ┗ ❌ All click strategies failed for multiselect ${question.qid}`);
+          logger.log(`   ┗ ❌ All click strategies failed for multiselect ${question.qid}`);
           return;
         }
 
@@ -2106,7 +2109,7 @@ async function fillSelectField(page, fieldElement, value, question = null) {
             const isVisible = await option.isVisible().catch(() => false);
             if (isVisible) {
               selectedOption = option;
-              console.log(`   ┣ Found selectable option: "${optionText}"`);
+              logger.log(`   ┣ Found selectable option: "${optionText}"`);
               break;
             }
           }
@@ -2115,30 +2118,30 @@ async function fillSelectField(page, fieldElement, value, question = null) {
             try {
               // Try multiple click strategies to handle element interception
               await selectedOption.click({ timeout: 3000 });
-              console.log(`   ┗ ✅ Selected option from multiselect`);
+              logger.log(`   ┗ ✅ Selected option from multiselect`);
             } catch (clickError) {
-              console.log(`   ┣ Direct click failed, trying alternative approach...`);
+              logger.log(`   ┣ Direct click failed, trying alternative approach...`);
               try {
                 // Try force click
                 await selectedOption.click({ force: true, timeout: 3000 });
-                console.log(`   ┗ ✅ Selected option with force click`);
+                logger.log(`   ┗ ✅ Selected option with force click`);
               } catch (forceClickError) {
-                console.log(`   ┗ ⚠️ Failed to click option: ${forceClickError.message}`);
+                logger.log(`   ┗ ⚠️ Failed to click option: ${forceClickError.message}`);
                 await page.keyboard.press('Escape');
               }
             }
           } else {
-            console.log(`   ┗ ⚠️ No selectable options found in multiselect`);
+            logger.log(`   ┗ ⚠️ No selectable options found in multiselect`);
             // Close the multiselect if no options found
             await page.keyboard.press('Escape');
           }
         } else {
-          console.log(`   ┗ ⚠️ No options found in multiselect dropdown`);
+          logger.log(`   ┗ ⚠️ No options found in multiselect dropdown`);
           // Close the multiselect
           await page.keyboard.press('Escape');
         }
       } catch (multiselectError) {
-        console.log(`   ┗ ⚠️ Error with multiselect interaction: ${multiselectError.message}`);
+        logger.log(`   ┗ ⚠️ Error with multiselect interaction: ${multiselectError.message}`);
         // Try to close any open dropdowns
         try {
           await page.keyboard.press('Escape');
@@ -2154,12 +2157,12 @@ async function fillSelectField(page, fieldElement, value, question = null) {
         const optionCount = await options.count();
         if (optionCount > 1) { // Skip first option (usually placeholder)
           await fieldElement.selectOption({ index: 1 });
-          console.log(`   ┗ ✅ Selected option from regular select`);
+          logger.log(`   ┗ ✅ Selected option from regular select`);
         }
       }
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling select field: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling select field: ${error.message}`);
     // Try to close any open dropdowns
     try {
       await page.keyboard.press('Escape');
@@ -2172,16 +2175,16 @@ async function fillSelectField(page, fieldElement, value, question = null) {
 /**
  * Fill a multiselect field
  */
-async function fillMultiSelectField(page, fieldElement, value, question = null) {
-  await fillSelectField(page, fieldElement, value, question);
+async function fillMultiSelectField(page, fieldElement, value, question = null, logger: ILogger) {
+  await fillSelectField(page, fieldElement, value, question, logger);
 }
 
 /**
  * Fill a date field
  */
-async function fillDateField(page, fieldElement, value) {
+async function fillDateField(page, fieldElement, value, logger: ILogger) {
   try {
-    console.log(`   ┣ 📅 Processing date field with value: ${value}`);
+    logger.log(`   ┣ 📅 Processing date field with value: ${value}`);
 
     // First, try to find actual input element within the wrapper
     const inputSelectors = [
@@ -2200,7 +2203,7 @@ async function fillDateField(page, fieldElement, value) {
         const isEnabled = await input.isEnabled().catch(() => true);
         if (isVisible && isEnabled) {
           actualInput = input;
-          console.log(`   ┣ Found actual input using selector: ${selector}`);
+          logger.log(`   ┣ Found actual input using selector: ${selector}`);
           break;
         }
       }
@@ -2214,29 +2217,30 @@ async function fillDateField(page, fieldElement, value) {
         const isEnabled = await parentInput.isEnabled().catch(() => true);
         if (isVisible && isEnabled) {
           actualInput = parentInput;
-          console.log(`   ┣ Found input in parent element`);
+          logger.log(`   ┣ Found input in parent element`);
         }
       }
     }
 
     if (actualInput) {
       try {
-        console.log(`   ┣ Attempting to fill input with: ${value}`);
+        logger.log(`   ┣ Attempting to fill input with: ${value}`);
         await actualInput.clear();
         await actualInput.fill(value);
-        console.log(`   ┗ ✅ Successfully filled date field`);
+        logger.log(`   ┗ ✅ Successfully filled date field`);
         return;
       } catch (fillError) {
-        console.log(`   ┣ Direct fill failed, trying alternative approach...`);
+        logger.log(`   ┣ Direct fill failed, trying alternative approach...`);
         try {
           await actualInput.click();
+          // @ts-ignore
           await inputBox.first().press('Control+a'); // Select all
           await page.keyboard.type(value);
           await page.keyboard.press('Tab'); // Move to next field
-          console.log(`   ┗ ✅ Successfully typed date value`);
+          logger.log(`   ┗ ✅ Successfully typed date value`);
           return;
         } catch (typeError) {
-          console.log(`   ┗ ❌ Both fill methods failed: ${typeError.message}`);
+          logger.log(`   ┗ ❌ Both fill methods failed: ${typeError.message}`);
         }
       }
     }
@@ -2245,7 +2249,7 @@ async function fillDateField(page, fieldElement, value) {
     const isDatePicker = await fieldElement.locator('..').locator('.form-input-button, .date-picker-button, button[class*="date"]').count() > 0;
 
     if (isDatePicker) {
-      console.log(`   ┣ Detected custom date picker component`);
+      logger.log(`   ┣ Detected custom date picker component`);
       // This is a custom date picker, try clicking the button
       const dateButton = fieldElement.locator('..').locator('button').first();
       if (await dateButton.count() > 0) {
@@ -2257,31 +2261,31 @@ async function fillDateField(page, fieldElement, value) {
           if (await pickerInput.count() > 0) {
             await pickerInput.fill(value);
             await page.keyboard.press('Enter');
-            console.log(`   ┗ ✅ Filled date picker input`);
+            logger.log(`   ┗ ✅ Filled date picker input`);
           } else {
             // Close picker since we can't set the value
             await page.keyboard.press('Escape');
-            console.log(`   ┗ ⚠️ Could not find date picker input, closed picker`);
+            logger.log(`   ┗ ⚠️ Could not find date picker input, closed picker`);
           }
         } catch (pickerError) {
-          console.log(`   ┗ ⚠️ Date picker interaction failed: ${pickerError.message}`);
+          logger.log(`   ┗ ⚠️ Date picker interaction failed: ${pickerError.message}`);
           // Try to close any open picker
           await page.keyboard.press('Escape').catch(() => { });
         }
       }
     } else {
-      console.log(`   ┗ ⚠️ Could not find fillable date input - field may be read-only or have different structure`);
+      logger.log(`   ┗ ⚠️ Could not find fillable date input - field may be read-only or have different structure`);
     }
 
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling date field: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling date field: ${error.message}`);
   }
 }
 
 /**
  * Fill a checkbox field
  */
-async function fillCheckboxField(page, fieldElement, value) {
+async function fillCheckboxField(page, fieldElement, value, logger: ILogger) {
   try {
     const isChecked = await fieldElement.isChecked();
     if (value && !isChecked) {
@@ -2290,28 +2294,28 @@ async function fillCheckboxField(page, fieldElement, value) {
       await fieldElement.uncheck();
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling checkbox field: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling checkbox field: ${error.message}`);
   }
 }
 
 /**
  * Fill a components field (special course field type)
  */
-async function fillComponentsField(page, fieldElement, value) {
+async function fillComponentsField(page, fieldElement, value, logger: ILogger) {
   try {
     // Components field is often a special multiselect or custom component
-    await fillSelectField(page, fieldElement, value);
+    await fillSelectField(page, fieldElement, value, undefined, logger);
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling components field: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling components field: ${error.message}`);
   }
 }
 
 /**
  * Fill a yesNo field (used in Jenzabar nested credit fields)
  */
-async function fillYesNoField(page, fieldElement, value, question = null) {
+async function fillYesNoField(page, fieldElement, value, question = null, logger: ILogger) {
   try {
-    console.log(`   ┣ 🏦  Processing yesNo field for: ${question?.qid || 'unknown'}`);
+    logger.log(`   ┣ 🏦  Processing yesNo field for: ${question?.qid || 'unknown'}`);
 
     // Look for Yes/No buttons in the parent wrapper
     const wrapper = fieldElement.locator('..');
@@ -2322,9 +2326,9 @@ async function fillYesNoField(page, fieldElement, value, question = null) {
     const noCount = await noButton.count();
 
     if (yesCount === 0 && noCount === 0) {
-      console.log(`   ┗ ⚠️ No Yes/No buttons found for yesNo field, trying checkbox approach...`);
+      logger.log(`   ┗ ⚠️ No Yes/No buttons found for yesNo field, trying checkbox approach...`);
       // Fallback to checkbox behavior
-      await fillCheckboxField(page, fieldElement, value);
+      await fillCheckboxField(page, fieldElement, value, logger);
       return;
     }
 
@@ -2339,42 +2343,42 @@ async function fillYesNoField(page, fieldElement, value, question = null) {
 
       if (isVisible && isEnabled) {
         await buttonToClick.click();
-        console.log(`   ┗ ✅ Selected ${buttonName} for yesNo field: ${question?.qid || 'unknown'}`);
+        logger.log(`   ┗ ✅ Selected ${buttonName} for yesNo field: ${question?.qid || 'unknown'}`);
       } else {
-        console.log(`   ┗ ⚠️ ${buttonName} button not clickable for yesNo field: ${question?.qid || 'unknown'}`);
+        logger.log(`   ┗ ⚠️ ${buttonName} button not clickable for yesNo field: ${question?.qid || 'unknown'}`);
       }
     } else {
-      console.log(`   ┗ ⚠️ ${buttonName} button not found for yesNo field: ${question?.qid || 'unknown'}`);
+      logger.log(`   ┗ ⚠️ ${buttonName} button not found for yesNo field: ${question?.qid || 'unknown'}`);
     }
 
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling yesNo field: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling yesNo field: ${error.message}`);
   }
 }
 
 /**
  * Handle course status inactivation by setting it to 'inactive'
  */
-async function handleCourseStatusInactivation(page, question) {
+async function handleCourseStatusInactivation(page, question, logger: ILogger) {
   try {
-    console.log(`🔄 [Inactivation] Processing status field for course inactivation...`);
+    logger.log(`🔄 [Inactivation] Processing status field for course inactivation...`);
     const courseContext = global.__currentCourseContext || {};
 
     // Find the status field using the same strategies as regular fields
     let fieldElement = await findFieldElement(page, question);
 
     if (!fieldElement) {
-      console.log(`   ┗ ❌ Could not find status field for inactivation`);
+      logger.log(`   ┗ ❌ Could not find status field for inactivation`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found status field for inactivation`);
+    logger.log(`   ┗ ✅ Found status field for inactivation`);
 
     // Check if it's a multiselect/dropdown or regular input
     const isMultiselect = await fieldElement.locator('..').locator('.multiselect, [class*="multiselect"]').count() > 0;
 
     if (isMultiselect) {
-      console.log(`   ┣ Status field is multiselect, looking for 'inactive' option...`);
+      logger.log(`   ┣ Status field is multiselect, looking for 'inactive' option...`);
       const wrapper = fieldElement.locator('..').locator('.multiselect, [class*="multiselect"]').first();
 
       try {
@@ -2393,54 +2397,54 @@ async function handleCourseStatusInactivation(page, question) {
 
           if (cleanText.includes('inact') || cleanText.includes('cancel')) {
             await option.click();
-            console.log(`   ┗ ✅ Selected inactive status: "${optionText}"`);
+            logger.log(`   ┗ ✅ Selected inactive status: "${optionText}"`);
             foundInactive = true;
             break;
           }
         }
 
         if (!foundInactive) {
-          console.log(`   ┗ ⚠️ Could not find inactive status option in dropdown`);
-          const manualSuccess = await promptManualStatusSelection(page, courseContext);
+          logger.log(`   ┗ ⚠️ Could not find inactive status option in dropdown`);
+          const manualSuccess = await promptManualStatusSelection(page, courseContext, logger);
           if (manualSuccess) {
             return;
           }
           throw new Error('Inactive status option not found and manual takeover could not be completed');
         }
       } catch (error) {
-        console.log(`   ┗ ❌ Error setting status to inactive: ${error.message}`);
+        logger.log(`   ┗ ❌ Error setting status to inactive: ${error.message}`);
       }
     } else {
       // Try to set as text input
-      console.log(`   ┣ Status field is text input, setting to 'inactive'...`);
+      logger.log(`   ┣ Status field is text input, setting to 'inactive'...`);
       try {
         await fieldElement.clear();
         await fieldElement.fill('inactive');
-        console.log(`   ┗ ✅ Set status to 'inactive'`);
+        logger.log(`   ┗ ✅ Set status to 'inactive'`);
       } catch (error) {
-        console.log(`   ┗ ❌ Error setting status text: ${error.message}`);
+        logger.log(`   ┗ ❌ Error setting status text: ${error.message}`);
       }
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in handleCourseStatusInactivation: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in handleCourseStatusInactivation: ${error.message}`);
   }
 }
 
 /**
  * Prompt manual takeover when automation can't choose the status option
  */
-async function promptManualStatusSelection(page, context = {}) {
-  const { browser, subfolder, schoolId, action = 'inactivateCourse' } = context || {};
+async function promptManualStatusSelection(page, context = {}, logger: ILogger) {
+  const { browser, subfolder, schoolId, action = 'inactivateCourse' } = context || {} as unknown as any;
 
   if (!browser || !subfolder || !schoolId) {
-    console.log('   ┗ ⚠️ Manual takeover unavailable (missing browser/subfolder/schoolId context)');
+    logger.log('   ┗ ⚠️ Manual takeover unavailable (missing browser/subfolder/schoolId context)');
     return false;
   }
 
   const userResponse = await waitForUserResponseWithTimeout(5);
   if (userResponse !== 'yes') {
     const reasonLabel = userResponse === 'timeout' ? 'timed out' : 'was declined';
-    console.log(`   ┗ ⚠️ Manual takeover ${reasonLabel} by user`);
+    logger.log(`   ┗ ⚠️ Manual takeover ${reasonLabel} by user`);
     return false;
   }
 
@@ -2457,36 +2461,36 @@ async function promptManualStatusSelection(page, context = {}) {
   );
 
   if (takeoverResult.success) {
-    console.log('   ┗ ✅ Manual takeover completed - status selection should now be set.');
+    logger.log('   ┗ ✅ Manual takeover completed - status selection should now be set.');
     return true;
   }
 
-  console.log('   ┗ ⚠️ Manual takeover ended without resolving the status selection');
+  logger.log('   ┗ ⚠️ Manual takeover ended without resolving the status selection');
   return false;
 }
 
 /**
  * Handle course status creation by setting it to 'Active'
  */
-async function handleCourseStatusCreation(page, question) {
+async function handleCourseStatusCreation(page, question, logger: ILogger) {
   try {
-    console.log(`🔄 [Creation] Processing status field for course creation...`);
+    logger.log(`🔄 [Creation] Processing status field for course creation...`);
 
     // Find the status field using the same strategies as regular fields
     let fieldElement = await findFieldElement(page, question);
 
     if (!fieldElement) {
-      console.log(`   ┗ ❌ Could not find status field for creation`);
+      logger.log(`   ┗ ❌ Could not find status field for creation`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found status field for creation`);
+    logger.log(`   ┗ ✅ Found status field for creation`);
 
     // Check if it's a multiselect/dropdown or regular input
     const isMultiselect = await fieldElement.locator('..').locator('.multiselect, [class*="multiselect"]').count() > 0;
 
     if (isMultiselect) {
-      console.log(`   ┣ Status field is multiselect, looking for 'Active' option...`);
+      logger.log(`   ┣ Status field is multiselect, looking for 'Active' option...`);
       const wrapper = fieldElement.locator('..').locator('.multiselect, [class*="multiselect"]').first();
 
       try {
@@ -2505,54 +2509,54 @@ async function handleCourseStatusCreation(page, question) {
 
           if (cleanText.includes('active')) {
             await option.click();
-            console.log(`   ┗ ✅ Selected active status: "${optionText}"`);
+            logger.log(`   ┗ ✅ Selected active status: "${optionText}"`);
             foundActive = true;
             break;
           }
         }
 
         if (!foundActive) {
-          console.log(`   ┗ ⚠️ Could not find active status option, selecting first available`);
+          logger.log(`   ┗ ⚠️ Could not find active status option, selecting first available`);
           const firstOption = options.first();
           if (await firstOption.count() > 0) {
             await firstOption.click();
           }
         }
       } catch (error) {
-        console.log(`   ┗ ❌ Error setting status to active: ${error.message}`);
+        logger.log(`   ┗ ❌ Error setting status to active: ${error.message}`);
       }
     } else {
       // Try to set as text input
-      console.log(`   ┣ Status field is text input, setting to 'Active'...`);
+      logger.log(`   ┣ Status field is text input, setting to 'Active'...`);
       try {
         await fieldElement.clear();
         await fieldElement.fill('Active');
-        console.log(`   ┗ ✅ Set status to 'Active'`);
+        logger.log(`   ┗ ✅ Set status to 'Active'`);
       } catch (error) {
-        console.log(`   ┗ ❌ Error setting status text: ${error.message}`);
+        logger.log(`   ┗ ❌ Error setting status text: ${error.message}`);
       }
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in handleCourseStatusCreation: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in handleCourseStatusCreation: ${error.message}`);
   }
 }
 
 /**
  * Handle effective start date creation by setting it to today's date
  */
-async function handleEffectiveStartDateCreation(page, question) {
+async function handleEffectiveStartDateCreation(page, question, logger: ILogger) {
   try {
-    console.log(`📅 [Creation] Processing effectiveStartDate field for course creation...`);
+    logger.log(`📅 [Creation] Processing effectiveStartDate field for course creation...`);
 
     // Find the effective start date field
     let fieldElement = await findFieldElement(page, question);
 
     if (!fieldElement) {
-      console.log(`   ┗ ❌ Could not find effectiveStartDate field for creation`);
+      logger.log(`   ┗ ❌ Could not find effectiveStartDate field for creation`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found effectiveStartDate field for creation`);
+    logger.log(`   ┗ ✅ Found effectiveStartDate field for creation`);
 
     // Generate today's date in the format "Aug 19, 2025"
     const today = new Date();
@@ -2563,30 +2567,30 @@ async function handleEffectiveStartDateCreation(page, question) {
     const year = today.getFullYear();
     const todayFormatted = `${month} ${day}, ${year}`;
 
-    console.log(`   ┣ Setting effectiveStartDate to today: ${todayFormatted}`);
+    logger.log(`   ┣ Setting effectiveStartDate to today: ${todayFormatted}`);
 
-    await fillDateFieldWithFormat(page, fieldElement, todayFormatted);
+    await fillDateFieldWithFormat(page, fieldElement, todayFormatted, logger);
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in handleEffectiveStartDateCreation: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in handleEffectiveStartDateCreation: ${error.message}`);
   }
 }
 
 /**
  * Handle date field creation by setting it to today's date in correct format
  */
-async function handleDateFieldCreation(page, question) {
+async function handleDateFieldCreation(page, question, logger: ILogger) {
   try {
-    console.log(`📅 [Creation] Processing date field ${question.qid} for course creation...`);
+    logger.log(`📅 [Creation] Processing date field ${question.qid} for course creation...`);
 
     // Find the date field
     let fieldElement = await findFieldElement(page, question);
 
     if (!fieldElement) {
-      console.log(`   ┗ ❌ Could not find ${question.qid} field for creation`);
+      logger.log(`   ┗ ❌ Could not find ${question.qid} field for creation`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found ${question.qid} field for creation`);
+    logger.log(`   ┗ ✅ Found ${question.qid} field for creation`);
 
     // Generate today's date in the format "Aug 19, 2025"
     const today = new Date();
@@ -2597,20 +2601,20 @@ async function handleDateFieldCreation(page, question) {
     const year = today.getFullYear();
     const todayFormatted = `${month} ${day}, ${year}`;
 
-    console.log(`   ┣ Setting ${question.qid} to today: ${todayFormatted}`);
+    logger.log(`   ┣ Setting ${question.qid} to today: ${todayFormatted}`);
 
-    await fillDateFieldWithFormat(page, fieldElement, todayFormatted);
+    await fillDateFieldWithFormat(page, fieldElement, todayFormatted, logger);
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in handleDateFieldCreation: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in handleDateFieldCreation: ${error.message}`);
   }
 }
 
 /**
  * Fill Credit Hours Min field for colleague_ethos schools
  */
-async function fillCreditHoursMinField(page) {
+async function fillCreditHoursMinField(page, logger: ILogger) {
   try {
-    console.log('   ┣ Searching for Credit Hours Min field...');
+    logger.log('   ┣ Searching for Credit Hours Min field...');
 
     // Try multiple selectors for Credit Hours Min field
     const selectors = [
@@ -2640,67 +2644,67 @@ async function fillCreditHoursMinField(page) {
     }
 
     if (!creditHoursField) {
-      console.log('   ┗ ⚠️ Credit Hours Min field not found, skipping');
+      logger.log('   ┗ ⚠️ Credit Hours Min field not found, skipping');
       return;
     }
 
-    console.log(`   ┣ Found Credit Hours Min field using: ${foundSelector}`);
+    logger.log(`   ┣ Found Credit Hours Min field using: ${foundSelector}`);
 
     // Generate random credit hours value (1-5)
     const randomCredits = Math.floor(Math.random() * 5) + 1;
-    console.log(`   ┣ Filling Credit Hours Min with: ${randomCredits}`);
+    logger.log(`   ┣ Filling Credit Hours Min with: ${randomCredits}`);
 
     try {
       await creditHoursField.clear();
       await creditHoursField.fill(randomCredits.toString());
-      console.log(`   ┗ ✅ Successfully filled Credit Hours Min with: ${randomCredits}`);
+      logger.log(`   ┗ ✅ Successfully filled Credit Hours Min with: ${randomCredits}`);
     } catch (fillError) {
-      console.log(`   ┣ Direct fill failed, trying typing...`);
+      logger.log(`   ┣ Direct fill failed, trying typing...`);
       try {
         await creditHoursField.click();
         await creditHoursField.press('Control+a');
         await page.keyboard.type(randomCredits.toString());
-        console.log(`   ┗ ✅ Successfully typed Credit Hours Min: ${randomCredits}`);
+        logger.log(`   ┗ ✅ Successfully typed Credit Hours Min: ${randomCredits}`);
       } catch (typeError) {
-        console.log(`   ┗ ❌ Failed to fill Credit Hours Min: ${typeError.message}`);
+        logger.log(`   ┗ ❌ Failed to fill Credit Hours Min: ${typeError.message}`);
       }
     }
 
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in fillCreditHoursMinField: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in fillCreditHoursMinField: ${error.message}`);
   }
 }
 
 /**
  * Helper function to fill date field with proper format
  */
-async function fillDateFieldWithFormat(page, fieldElement, dateValue) {
+async function fillDateFieldWithFormat(page, fieldElement, dateValue, logger: ILogger) {
   // Look for actual input field within the element (could be nested)
   const inputField = fieldElement.locator('input[type="text"], input[type="date"], input').first();
   const inputCount = await inputField.count();
 
   if (inputCount > 0) {
     try {
-      console.log(`   ┣ Found input field, attempting to fill with: ${dateValue}`);
+      logger.log(`   ┣ Found input field, attempting to fill with: ${dateValue}`);
       await inputField.clear();
       await inputField.fill(dateValue);
       await page.waitForTimeout(500);
       await inputField.press('Enter'); // Close any date picker
-      console.log(`   ┗ ✅ Successfully set date to ${dateValue}`);
+      logger.log(`   ┗ ✅ Successfully set date to ${dateValue}`);
     } catch (inputError) {
-      console.log(`   ┣ Input field fill failed, trying direct typing...`);
+      logger.log(`   ┣ Input field fill failed, trying direct typing...`);
       try {
         await inputField.click();
         await inputField.press('Control+a'); // Select all
         await page.keyboard.type(dateValue);
         await inputField.press('Enter');
-        console.log(`   ┗ ✅ Successfully typed date: ${dateValue}`);
+        logger.log(`   ┗ ✅ Successfully typed date: ${dateValue}`);
       } catch (typeError) {
-        console.log(`   ┗ ❌ Error typing date: ${typeError.message}`);
+        logger.log(`   ┗ ❌ Error typing date: ${typeError.message}`);
       }
     }
   } else {
-    console.log(`   ┣ No input field found, trying to interact with wrapper element...`);
+    logger.log(`   ┣ No input field found, trying to interact with wrapper element...`);
     try {
       // Try to click the element first to activate it
       await fieldElement.click();
@@ -2710,9 +2714,9 @@ async function fillDateFieldWithFormat(page, fieldElement, dateValue) {
       await fieldElement.press('Control+a'); // Select all existing content
       await page.keyboard.type(dateValue);
       await fieldElement.press('Enter');
-      console.log(`   ┗ ✅ Successfully set date via typing: ${dateValue}`);
+      logger.log(`   ┗ ✅ Successfully set date via typing: ${dateValue}`);
     } catch (directError) {
-      console.log(`   ┗ ❌ Error setting date directly: ${directError.message}`);
+      logger.log(`   ┗ ❌ Error setting date directly: ${directError.message}`);
     }
   }
 }
@@ -2720,19 +2724,19 @@ async function fillDateFieldWithFormat(page, fieldElement, dateValue) {
 /**
  * Handle effective start date revision by setting it to today's date
  */
-async function handleEffectiveStartDateRevision(page, question) {
+async function handleEffectiveStartDateRevision(page, question, logger: ILogger) {
   try {
-    console.log(`📅 [Revision] Processing effectiveStartDate field for course revision...`);
+    logger.log(`📅 [Revision] Processing effectiveStartDate field for course revision...`);
 
     // Find the effective start date field
     let fieldElement = await findFieldElement(page, question);
 
     if (!fieldElement) {
-      console.log(`   ┗ ❌ Could not find effectiveStartDate field for revision`);
+      logger.log(`   ┗ ❌ Could not find effectiveStartDate field for revision`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found effectiveStartDate field for revision`);
+    logger.log(`   ┗ ✅ Found effectiveStartDate field for revision`);
 
     // Generate today's date in the format "Aug 19, 2025"
     const today = new Date();
@@ -2743,7 +2747,7 @@ async function handleEffectiveStartDateRevision(page, question) {
     const year = today.getFullYear();
     const todayFormatted = `${month} ${day}, ${year}`;
 
-    console.log(`   ┣ Setting effectiveStartDate to today: ${todayFormatted}`);
+    logger.log(`   ┣ Setting effectiveStartDate to today: ${todayFormatted}`);
 
     // Look for actual input field within the element (could be nested)
     const inputField = fieldElement.locator('input[type="text"], input[type="date"], input').first();
@@ -2751,26 +2755,26 @@ async function handleEffectiveStartDateRevision(page, question) {
 
     if (inputCount > 0) {
       try {
-        console.log(`   ┣ Found input field, attempting to fill with: ${todayFormatted}`);
+        logger.log(`   ┣ Found input field, attempting to fill with: ${todayFormatted}`);
         await inputField.clear();
         await inputField.fill(todayFormatted);
         await page.waitForTimeout(500);
         await inputField.press('Enter'); // Close any date picker
-        console.log(`   ┗ ✅ Successfully set effectiveStartDate to ${todayFormatted}`);
+        logger.log(`   ┗ ✅ Successfully set effectiveStartDate to ${todayFormatted}`);
       } catch (inputError) {
-        console.log(`   ┣ Input field fill failed, trying direct typing...`);
+        logger.log(`   ┣ Input field fill failed, trying direct typing...`);
         try {
           await inputField.click();
           await inputField.press('Control+a'); // Select all
           await page.keyboard.type(todayFormatted);
           await inputField.press('Enter');
-          console.log(`   ┗ ✅ Successfully typed effectiveStartDate: ${todayFormatted}`);
+          logger.log(`   ┗ ✅ Successfully typed effectiveStartDate: ${todayFormatted}`);
         } catch (typeError) {
-          console.log(`   ┗ ❌ Error typing effectiveStartDate: ${typeError.message}`);
+          logger.log(`   ┗ ❌ Error typing effectiveStartDate: ${typeError.message}`);
         }
       }
     } else {
-      console.log(`   ┣ No input field found, trying to interact with wrapper element...`);
+      logger.log(`   ┣ No input field found, trying to interact with wrapper element...`);
       try {
         // Try to click the element first to activate it
         await fieldElement.click();
@@ -2780,32 +2784,32 @@ async function handleEffectiveStartDateRevision(page, question) {
         await fieldElement.press('Control+a'); // Select all existing content
         await page.keyboard.type(todayFormatted);
         await fieldElement.press('Enter');
-        console.log(`   ┗ ✅ Successfully set effectiveStartDate via typing: ${todayFormatted}`);
+        logger.log(`   ┗ ✅ Successfully set effectiveStartDate via typing: ${todayFormatted}`);
       } catch (directError) {
-        console.log(`   ┗ ❌ Error setting effectiveStartDate directly: ${directError.message}`);
+        logger.log(`   ┗ ❌ Error setting effectiveStartDate directly: ${directError.message}`);
       }
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in handleEffectiveStartDateRevision: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in handleEffectiveStartDateRevision: ${error.message}`);
   }
 }
 
 /**
  * Handle effective end date by setting it to today's date
  */
-async function handleEffectiveEndDateInactivation(page, question) {
+async function handleEffectiveEndDateInactivation(page, question, logger: ILogger) {
   try {
-    console.log(`📅 [Inactivation] Processing effectiveEndDate field for course inactivation...`);
+    logger.log(`📅 [Inactivation] Processing effectiveEndDate field for course inactivation...`);
 
     // Find the effective end date field
     let fieldElement = await findFieldElement(page, question);
 
     if (!fieldElement) {
-      console.log(`   ┗ ❌ Could not find effectiveEndDate field for inactivation`);
+      logger.log(`   ┗ ❌ Could not find effectiveEndDate field for inactivation`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found effectiveEndDate field for inactivation`);
+    logger.log(`   ┗ ✅ Found effectiveEndDate field for inactivation`);
 
     // Generate today's date in the format "Aug 19, 2025"
     const today = new Date();
@@ -2816,7 +2820,7 @@ async function handleEffectiveEndDateInactivation(page, question) {
     const year = today.getFullYear();
     const todayFormatted = `${month} ${day}, ${year}`;
 
-    console.log(`   ┣ Setting effectiveEndDate to today: ${todayFormatted}`);
+    logger.log(`   ┣ Setting effectiveEndDate to today: ${todayFormatted}`);
 
     // Look for actual input field within the element (could be nested)
     const inputField = fieldElement.locator('input[type="text"], input[type="date"], input').first();
@@ -2824,26 +2828,26 @@ async function handleEffectiveEndDateInactivation(page, question) {
 
     if (inputCount > 0) {
       try {
-        console.log(`   ┣ Found input field, attempting to fill with: ${todayFormatted}`);
+        logger.log(`   ┣ Found input field, attempting to fill with: ${todayFormatted}`);
         await inputField.clear();
         await inputField.fill(todayFormatted);
         await page.waitForTimeout(500);
         await inputField.press('Enter'); // Close any date picker
-        console.log(`   ┗ ✅ Successfully set effectiveEndDate to ${todayFormatted}`);
+        logger.log(`   ┗ ✅ Successfully set effectiveEndDate to ${todayFormatted}`);
       } catch (inputError) {
-        console.log(`   ┣ Input field fill failed, trying direct typing...`);
+        logger.log(`   ┣ Input field fill failed, trying direct typing...`);
         try {
           await inputField.click();
           await inputField.press('Control+a'); // Select all
           await page.keyboard.type(todayFormatted);
           await inputField.press('Enter');
-          console.log(`   ┗ ✅ Successfully typed effectiveEndDate: ${todayFormatted}`);
+          logger.log(`   ┗ ✅ Successfully typed effectiveEndDate: ${todayFormatted}`);
         } catch (typeError) {
-          console.log(`   ┗ ❌ Error typing effectiveEndDate: ${typeError.message}`);
+          logger.log(`   ┗ ❌ Error typing effectiveEndDate: ${typeError.message}`);
         }
       }
     } else {
-      console.log(`   ┣ No input field found, trying to interact with wrapper element...`);
+      logger.log(`   ┣ No input field found, trying to interact with wrapper element...`);
       try {
         // Try to click the element first to activate it
         await fieldElement.click();
@@ -2853,13 +2857,13 @@ async function handleEffectiveEndDateInactivation(page, question) {
         await fieldElement.press('Control+a'); // Select all existing content
         await page.keyboard.type(todayFormatted);
         await fieldElement.press('Enter');
-        console.log(`   ┗ ✅ Successfully set effectiveEndDate via typing: ${todayFormatted}`);
+        logger.log(`   ┗ ✅ Successfully set effectiveEndDate via typing: ${todayFormatted}`);
       } catch (directError) {
-        console.log(`   ┗ ❌ Error setting effectiveEndDate directly: ${directError.message}`);
+        logger.log(`   ┗ ❌ Error setting effectiveEndDate directly: ${directError.message}`);
       }
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in handleEffectiveEndDateInactivation: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in handleEffectiveEndDateInactivation: ${error.message}`);
   }
 }
 
@@ -2922,7 +2926,7 @@ async function findFieldElement(page, question) {
 /**
  * Fill Yes/No button fields by selecting the opposite of the currently selected value
  */
-async function fillYesNoButtons(page, fieldElement, question) {
+async function fillYesNoButtons(page, fieldElement, question, logger: ILogger) {
   try {
     const qid = question.qid;
 
@@ -2935,11 +2939,11 @@ async function fillYesNoButtons(page, fieldElement, question) {
     const noCount = await noButton.count();
 
     if (yesCount === 0 || noCount === 0) {
-      console.log(`   ┗ ⚠️ Yes/No buttons not found for ${qid} (Yes: ${yesCount}, No: ${noCount})`);
+      logger.log(`   ┗ ⚠️ Yes/No buttons not found for ${qid} (Yes: ${yesCount}, No: ${noCount})`);
       return;
     }
 
-    console.log(`   ┣ 🔘 Processing Yes/No buttons for ${qid}`);
+    logger.log(`   ┣ 🔘 Processing Yes/No buttons for ${qid}`);
 
     // Check which button is currently selected (has btn-raised class)
     const yesClass = await yesButton.first().getAttribute('class') || '';
@@ -2948,7 +2952,7 @@ async function fillYesNoButtons(page, fieldElement, question) {
     const isYesSelected = yesClass.includes('btn-raised');
     const isNoSelected = noClass.includes('btn-raised');
 
-    console.log(`   ┣ Current state - Yes selected: ${isYesSelected}, No selected: ${isNoSelected}`);
+    logger.log(`   ┣ Current state - Yes selected: ${isYesSelected}, No selected: ${isNoSelected}`);
 
     // Determine which button to click (opposite of current selection)
     let buttonToClick = null;
@@ -2977,25 +2981,25 @@ async function fillYesNoButtons(page, fieldElement, question) {
     const isEnabled = await buttonToClick.isEnabled();
 
     if (!isVisible) {
-      console.log(`   ┗ 👁️ ${buttonToClickName} button for ${qid} not visible, skipping.`);
+      logger.log(`   ┗ 👁️ ${buttonToClickName} button for ${qid} not visible, skipping.`);
       return;
     }
 
     if (!isEnabled) {
-      console.log(`   ┗ 🔒 ${buttonToClickName} button for ${qid} not enabled, skipping.`);
+      logger.log(`   ┗ 🔒 ${buttonToClickName} button for ${qid} not enabled, skipping.`);
       return;
     }
 
     // Click the opposite button
     try {
       await buttonToClick.click();
-      console.log(`   ┗ ✅ Clicked ${buttonToClickName} button for ${qid} (selecting opposite value)`);
+      logger.log(`   ┗ ✅ Clicked ${buttonToClickName} button for ${qid} (selecting opposite value)`);
     } catch (clickError) {
-      console.log(`   ┗ ❌ Failed to click ${buttonToClickName} button for ${qid}: ${clickError.message}`);
+      logger.log(`   ┗ ❌ Failed to click ${buttonToClickName} button for ${qid}: ${clickError.message}`);
     }
 
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling Yes/No buttons ${question.qid}: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling Yes/No buttons ${question.qid}: ${error.message}`);
   }
 }
 
@@ -3003,7 +3007,7 @@ async function fillYesNoButtons(page, fieldElement, question) {
  * Fill a multiselect dropdown by selecting the first available option
  * Similar to logic from sectionTemplateFill.js
  */
-async function fillMultiselectDropdown(page, fieldElement, question, action = 'updateCourse') {
+async function fillMultiselectDropdown(page, fieldElement, question, action = 'updateCourse', logger: ILogger) {
   try {
     const qid = question.qid;
 
@@ -3011,14 +3015,14 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
     const wrapper = fieldElement.locator('..').locator('.multiselect, [class*="multiselect"]').first();
 
     if (await wrapper.count() === 0) {
-      console.log(`   ┗ ⚠️ No multiselect wrapper found for ${qid}`);
+      logger.log(`   ┗ ⚠️ No multiselect wrapper found for ${qid}`);
       return;
     }
 
     // Check if multiselect is disabled
     const multiselectClass = await wrapper.getAttribute('class');
     if (multiselectClass && multiselectClass.includes('multiselect--disabled')) {
-      console.log(`   ┗ 🚫 Multiselect for ${qid} is disabled, skipping.`);
+      logger.log(`   ┗ 🚫 Multiselect for ${qid} is disabled, skipping.`);
       return;
     }
 
@@ -3027,23 +3031,23 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
     const isEnabled = await wrapper.isEnabled();
 
     if (!isVisible) {
-      console.log(`   ┗ 👁️ Multiselect for ${qid} not visible, skipping.`);
+      logger.log(`   ┗ 👁️ Multiselect for ${qid} not visible, skipping.`);
       return;
     }
 
     if (!isEnabled) {
-      console.log(`   ┗ 🔒 Multiselect for ${qid} not enabled, skipping.`);
+      logger.log(`   ┗ 🔒 Multiselect for ${qid} not enabled, skipping.`);
       return;
     }
 
-    console.log(`   ┣ 🔽 Processing multiselect for ${qid}`);
+    logger.log(`   ┣ 🔽 Processing multiselect for ${qid}`);
 
     // If single-select and has existing value, clear it first to allow a new selection
     const isSingleSelect = await wrapper.locator('.multiselect__tag').count().then(c => c <= 1);
     const existingSingle = wrapper.locator('.multiselect__tag');
     const existingCount = await existingSingle.count();
     if (existingCount > 0 && isSingleSelect) {
-      console.log(`   ┣ Clearing existing selection for ${qid} to set a new value...`);
+      logger.log(`   ┣ Clearing existing selection for ${qid} to set a new value...`);
       try {
         // Try clicking the tag remove icon
         const removeIcon = existingSingle.first().locator('.multiselect__tag-icon');
@@ -3079,8 +3083,8 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
         if (isEmptyMapping) {
           const q = (question && question.qid) ? question.qid : 'unknown-field';
           const reason = 'Skipped: Empty attribute mappings (List is empty drop down)';
-          console.log(`   ┗ 🚫 ${q} dropdown shows empty mapping — skipping field`);
-          recordSkipReason(q, reason);
+          logger.log(`   ┗ 🚫 ${q} dropdown shows empty mapping — skipping field`);
+          recordSkipReason(q, reason, logger);
           await page.keyboard.press('Escape').catch(() => { });
           return;
         }
@@ -3092,14 +3096,14 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
         try {
           const inputStyle = await inputBox.first().getAttribute('style') || '';
           if (inputStyle.includes('width: 0px')) {
-            console.log(`   ┣ Input box for multiselect ${qid} has width 0px, clicking to focus...`);
+            logger.log(`   ┣ Input box for multiselect ${qid} has width 0px, clicking to focus...`);
             await wrapper.click();
             await page.waitForTimeout(200);
           }
           const placeholderText = (await inputBox.first().getAttribute('placeholder') || '').trim();
           const shouldType = placeholderText && /type|search/i.test(placeholderText);
           if (shouldType) {
-            console.log(`   ┣ Multiselect ${qid} input placeholder indicates typing: "${placeholderText}"`);
+            logger.log(`   ┣ Multiselect ${qid} input placeholder indicates typing: "${placeholderText}"`);
             // Build randomized fallback alphabet order
             const letters = 'abcdefghijklmnopqrstuvwxyz'.split('');
             for (let i = letters.length - 1; i > 0; i--) {
@@ -3114,7 +3118,7 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
             }
             const tried = new Set();
             const tryLetter = async (ch) => {
-              console.log(`   ┃ Trying letter "${ch}" in multiselect input for ${qid}...`);
+              logger.log(`   ┃ Trying letter "${ch}" in multiselect input for ${qid}...`);
               await inputBox.first().fill(ch);
               await page.waitForTimeout(1200);
               const noResults = page.locator('.multiselect__option', { hasText: 'No departments found' });
@@ -3123,15 +3127,15 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
               const realOptions = page.locator('.multiselect__content-wrapper li:not(.option--disabled):not(.multiselect__option--disabled)');
               const realCount = await realOptions.count();
               if (noResVisible) {
-                console.log(`   ┃ No departments found for letter "${ch}" in ${qid}.`);
+                logger.log(`   ┃ No departments found for letter "${ch}" in ${qid}.`);
               }
               if (realCount === 0) {
-                console.log(`   ┃ No real options found for letter "${ch}" in ${qid}.`);
+                logger.log(`   ┃ No real options found for letter "${ch}" in ${qid}.`);
               }
               if (noResVisible || realCount === 0) {
                 return false; // need another letter
               }
-              console.log(`   ┃ Options found for letter "${ch}" in ${qid}.`);
+              logger.log(`   ┃ Options found for letter "${ch}" in ${qid}.`);
               return true;
             };
 
@@ -3141,7 +3145,7 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
               if (tried.has(ch)) continue; tried.add(ch);
               success = await tryLetter(ch);
               if (success) {
-                console.log(`   ┣ Found options for ${qid} using preferred letter "${ch}".`);
+                logger.log(`   ┣ Found options for ${qid} using preferred letter "${ch}".`);
                 break;
               } else {
                 await inputBox.first().fill('');
@@ -3154,7 +3158,7 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
                 if (tried.has(ch)) continue; tried.add(ch);
                 success = await tryLetter(ch);
                 if (success) {
-                  console.log(`   ┣ Found options for ${qid} using fallback letter "${ch}".`);
+                  logger.log(`   ┣ Found options for ${qid} using fallback letter "${ch}".`);
                   break;
                 } else {
                   await inputBox.first().fill('');
@@ -3163,17 +3167,17 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
               }
             }
             if (!success) {
-              console.log(`   ┗ 🚫 No options found for multiselect ${qid} after trying all letters.`);
-              recordSkipReason(qid, 'Skipped: No attribute mappings found');
+              logger.log(`   ┗ 🚫 No options found for multiselect ${qid} after trying all letters.`);
+              recordSkipReason(qid, 'Skipped: No attribute mappings found', logger);
             }
           } else {
-            console.log(`   ┣ Multiselect ${qid} input placeholder does not indicate typing (placeholder: "${placeholderText}"). Skipping letter typing.`);
+            logger.log(`   ┣ Multiselect ${qid} input placeholder does not indicate typing (placeholder: "${placeholderText}"). Skipping letter typing.`);
           }
         } catch (err) {
-          console.log(`   ┗ ⚠️ Error while trying to remote-load options for multiselect ${qid}: ${err && err.message ? err.message : err}`);
+          logger.log(`   ┗ ⚠️ Error while trying to remote-load options for multiselect ${qid}: ${err && err.message ? err.message : err}`);
         }
       } else {
-        console.log(`   ┣ No input box found for multiselect ${qid}.`);
+        logger.log(`   ┣ No input box found for multiselect ${qid}.`);
       }
 
       // Check for options
@@ -3181,8 +3185,8 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
       const optionCount = await options.count();
 
       if (optionCount === 0) {
-        console.log(`   ┗ 🚫 Multiselect for ${qid} has no options, skipping.`);
-        recordSkipReason(qid, 'Skipped: Empty attribute mappings (List is empty drop down)');
+        logger.log(`   ┗ 🚫 Multiselect for ${qid} has no options, skipping.`);
+        recordSkipReason(qid, 'Skipped: Empty attribute mappings (List is empty drop down)', logger);
         return;
       }
 
@@ -3192,7 +3196,7 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
         const realOptions = dd.locator('li:not(.option--disabled):not(.multiselect__option--disabled), [role="option"]:not([aria-disabled="true"])');
         const realCount = await realOptions.count().catch(() => 0);
         if (realCount === 0) {
-          recordSkipReason(qid, 'Skipped: Empty attribute mappings (List is empty drop down)');
+          recordSkipReason(qid, 'Skipped: Empty attribute mappings (List is empty drop down)', logger);
           await page.keyboard.press('Escape').catch(() => { });
           return;
         }
@@ -3231,13 +3235,13 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
             }
           } catch (_) { }
           await option.click({ timeout: 1000 });
-          console.log(`   ┗ ✅ Selected option index ${idx + 1} for multiselect ${qid}`);
+          logger.log(`   ┗ ✅ Selected option index ${idx + 1} for multiselect ${qid}`);
           selected = true;
           break;
         } catch (_) {
           try {
             await option.click({ force: true, timeout: 1000 });
-            console.log(`   ┗ ✅ Selected option (force) index ${idx + 1} for multiselect ${qid}`);
+            logger.log(`   ┗ ✅ Selected option (force) index ${idx + 1} for multiselect ${qid}`);
             selected = true;
             break;
           } catch (_) {
@@ -3247,18 +3251,18 @@ async function fillMultiselectDropdown(page, fieldElement, question, action = 'u
       }
 
       if (!selected) {
-        console.log(`   ┗ 🚫 Multiselect for ${qid} has options, but none are visible/selectable. Skipping.`);
-        recordSkipReason(qid, 'Skipped: Options not selectable');
+        logger.log(`   ┗ 🚫 Multiselect for ${qid} has options, but none are visible/selectable. Skipping.`);
+        recordSkipReason(qid, 'Skipped: Options not selectable', logger);
       }
 
     } catch (err) {
-      console.log(`   ┗ ❌ Couldn't click multiselect for ${qid}, skipping. Reason: ${err.message}`);
-      recordSkipReason(qid, `Skipped: ${err && err.message ? err.message : 'Unknown error'}`);
+      logger.log(`   ┗ ❌ Couldn't click multiselect for ${qid}, skipping. Reason: ${err.message}`);
+      recordSkipReason(qid, `Skipped: ${err && err.message ? err.message : 'Unknown error'}`, logger);
     }
 
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling multiselect dropdown ${question.qid}: ${error.message}`);
-    try { recordSkipReason((question && question.qid) || 'unknown-field', `Skipped: ${error.message}`); } catch (_) { }
+    logger.log(`   ┗ ⚠️ Error filling multiselect dropdown ${question.qid}: ${error.message}`);
+    try { recordSkipReason((question && question.qid) || 'unknown-field', `Skipped: ${error.message}`, logger); } catch (_) { }
   }
 }
 
@@ -3426,9 +3430,9 @@ async function checkFieldIsLoading(page, fieldElement) {
  * the associated control. If empty, it fills a safe default based on type.
  * @param {Object} page - Playwright page object
  */
-async function preFillRequiredEmptyFields(page) {
+async function preFillRequiredEmptyFields(page, logger: ILogger) {
   try {
-    console.log('🔎 Checking for empty required fields before save...');
+    logger.log('🔎 Checking for empty required fields before save...');
 
     // Protected qids that must never be auto-filled during update/save
     const protectedQids = new Set([
@@ -3505,14 +3509,14 @@ async function preFillRequiredEmptyFields(page) {
       // Try multiselect/select-like first
       if (cls.includes('multiselect') || role === 'combobox' || role === 'listbox') {
         try {
-          await fillSelectField(page, el, 'auto-select', { qid: 'prefill' });
+          await fillSelectField(page, el, 'auto-select', { qid: 'prefill' }, logger);
           return true;
         } catch (_) { }
       }
 
       if (tag === 'select') {
         try {
-          await fillSelectField(page, el, 'auto-select', { qid: 'prefill' });
+          await fillSelectField(page, el, 'auto-select', { qid: 'prefill' }, logger);
           return true;
         } catch (_) { }
       }
@@ -3524,17 +3528,17 @@ async function preFillRequiredEmptyFields(page) {
 
       if (tag === 'input') {
         if (typeAttr === 'number') {
-          await fillNumberField(page, el, 1);
+          await fillNumberField(page, el, 1, logger);
           return true;
         }
         if (typeAttr === 'date') {
           const today = new Date();
           const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           const formatted = `${monthNames[today.getMonth()]} ${today.getDate()}, ${today.getFullYear()}`;
-          await fillDateField(page, el, formatted);
+          await fillDateField(page, el, formatted, logger);
           return true;
         }
-        await fillTextField(page, el, 'Auto-filled to proceed - Coursedog test');
+        await fillTextField(page, el, 'Auto-filled to proceed - Coursedog test', logger);
         return true;
       }
 
@@ -3543,7 +3547,7 @@ async function preFillRequiredEmptyFields(page) {
         const today = new Date();
         const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         const formatted = `${monthNames[today.getMonth()]} ${today.getDate()}, ${today.getFullYear()}`;
-        await fillDateField(page, el, formatted);
+        await fillDateField(page, el, formatted, logger);
         return true;
       }
 
@@ -3554,18 +3558,18 @@ async function preFillRequiredEmptyFields(page) {
         if (nestedTag === 'textarea') {
           await fillTextAreaField(page, nested, 'Auto-filled to proceed - Coursedog test');
         } else if (nestedTag === 'select') {
-          await fillSelectField(page, nested, 'auto-select', { qid: 'prefill' });
+          await fillSelectField(page, nested, 'auto-select', { qid: 'prefill' }, logger);
         } else {
           const nestedType = (await nested.getAttribute('type')) || '';
           if (nestedType === 'number') {
-            await fillNumberField(page, nested, 1);
+            await fillNumberField(page, nested, 1, logger);
           } else if (nestedType === 'date') {
             const today = new Date();
             const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
             const formatted = `${monthNames[today.getMonth()]} ${today.getDate()}, ${today.getFullYear()}`;
-            await fillDateField(page, nested, formatted);
+            await fillDateField(page, nested, formatted, logger);
           } else {
-            await fillTextField(page, nested, 'Auto-filled to proceed - Coursedog test');
+            await fillTextField(page, nested, 'Auto-filled to proceed - Coursedog test', logger);
           }
         }
         return true;
@@ -3648,7 +3652,7 @@ async function preFillRequiredEmptyFields(page) {
 
       const qid = await inferQid(fieldWrapper, control);
       if (qid && protectedQids.has(qid)) {
-        console.log(`   ┗ ⏭️ Prefill skip for protected field: ${qid}`);
+        logger.log(`   ┗ ⏭️ Prefill skip for protected field: ${qid}`);
         continue;
       }
 
@@ -3663,9 +3667,9 @@ async function preFillRequiredEmptyFields(page) {
       } catch (_) { }
     }
 
-    console.log(`✅ Pre-filled ${filled} required field(s) before save`);
+    logger.log(`✅ Pre-filled ${filled} required field(s) before save`);
   } catch (error) {
-    console.log(`⚠️ Error during preFillRequiredEmptyFields: ${error.message}`);
+    logger.log(`⚠️ Error during preFillRequiredEmptyFields: ${error.message}`);
   }
 }
 
@@ -3676,20 +3680,20 @@ async function preFillRequiredEmptyFields(page) {
  * @param {Object} question - Question configuration from template
  * @param {*} testValue - Value to fill
  */
-async function fillFieldByType(page, fieldElement, question, testValue) {
+async function fillFieldByType(page, fieldElement, question, testValue, logger: ILogger) {
   const questionType = question.questionType || question.type;
 
   // Check if field is disabled
   const isDisabled = await fieldElement.isDisabled().catch(() => false);
   if (isDisabled) {
-    console.log(`   ┗ ⏭️ Field is disabled, skipping`);
+    logger.log(`   ┗ ⏭️ Field is disabled, skipping`);
     return;
   }
 
   try {
     switch (questionType) {
       case 'text':
-        await fillTextField(page, fieldElement, testValue);
+        await fillTextField(page, fieldElement, testValue, logger);
         break;
 
       case 'textarea':
@@ -3701,66 +3705,66 @@ async function fillFieldByType(page, fieldElement, question, testValue) {
         break;
 
       case 'number':
-        await fillNumberField(page, fieldElement, testValue);
+        await fillNumberField(page, fieldElement, testValue, logger);
         break;
 
       case 'courseNumber':
-        await fillTextField(page, fieldElement, testValue);
+        await fillTextField(page, fieldElement, testValue, logger);
         break;
 
       case 'select':
       case 'dropdown': {
         const t0 = Date.now();
-        await fillSelectField(page, fieldElement, testValue, question);
+        await fillSelectField(page, fieldElement, testValue, question, logger);
         const elapsed = Date.now() - t0;
         if (elapsed > 3000) {
-          console.log(`   ┗ ⏱️ Select handling took ${elapsed}ms for ${question.qid}`);
+          logger.log(`   ┗ ⏱️ Select handling took ${elapsed}ms for ${question.qid}`);
         }
         break;
       }
 
       case 'multiselect': {
         const t0 = Date.now();
-        await fillMultiSelectField(page, fieldElement, testValue, question);
+        await fillMultiSelectField(page, fieldElement, testValue, question, logger);
         const elapsed = Date.now() - t0;
         if (elapsed > 3000) {
-          console.log(`   ┗ ⏱️ Multiselect handling took ${elapsed}ms for ${question.qid}`);
+          logger.log(`   ┗ ⏱️ Multiselect handling took ${elapsed}ms for ${question.qid}`);
         }
         break;
       }
 
       case 'date':
-        await fillDateField(page, fieldElement, testValue);
+        await fillDateField(page, fieldElement, testValue, logger);
         break;
 
       case 'checkbox':
       case 'boolean':
-        await fillCheckboxField(page, fieldElement, testValue);
+        await fillCheckboxField(page, fieldElement, testValue, logger);
         break;
 
       case 'components':
         // Special handling for course components
-        await fillComponentsField(page, fieldElement, testValue);
+        await fillComponentsField(page, fieldElement, testValue, logger);
         break;
 
       // Removed special-case handling for 'instructionalMethods' to avoid double writes; handled via fillSubfieldsFromConfig
 
       case 'gradeModesMultiSelect':
         // Special handling for grade modes multiselect (often has existing values)
-        await fillSelectField(page, fieldElement, testValue, question);
+        await fillSelectField(page, fieldElement, testValue, question, logger);
         break;
 
       case 'yesNo':
         // Special handling for yesNo input type (used in Jenzabar credits fields)
-        await fillYesNoField(page, fieldElement, testValue, question);
+        await fillYesNoField(page, fieldElement, testValue, question, logger);
         break;
 
       default:
         // Default to text field
-        await fillTextField(page, fieldElement, testValue);
+        await fillTextField(page, fieldElement, testValue, logger);
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling field of type ${questionType}: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling field of type ${questionType}: ${error.message}`);
   }
 }
 
@@ -3916,7 +3920,7 @@ function getConfiguredMaxLength(question) {
  * @param {string} schoolId - School identifier
  * @returns {string|null} - Path to the latest template file or null if not found
  */
-function getLatestCourseTemplateFile(schoolId) {
+function getLatestCourseTemplateFile(schoolId, logger: ILogger) {
   try {
     const resourcesDir = path.join(__dirname, 'Resources');
     if (!fs.existsSync(resourcesDir)) {
@@ -3946,7 +3950,7 @@ function getLatestCourseTemplateFile(schoolId) {
 
     return path.join(resourcesDir, courseTemplateFiles[0]);
   } catch (error) {
-    console.error('❌ Error finding course template file:', error.message);
+    logger.error('❌ Error finding course template file:', error.message);
     return null;
   }
 }
@@ -3958,20 +3962,20 @@ function getLatestCourseTemplateFile(schoolId) {
  * @param {string} subfolder - Output directory
  * @param {string} schoolId - School identifier
  */
-async function saveCourseFieldDifferences(beforeValues, afterValues, subfolder, schoolId, action) {
+async function saveCourseFieldDifferences(beforeValues, afterValues, subfolder, schoolId, action, logger: ILogger) {
   try {
-    ensureRunLogger(subfolder);
+    ensureRunLogger(subfolder, logger);
     const tableRows = [];
     // Load template once to map qids -> labels
     let labelByQid = {};
     try {
-      const tplFile = getLatestCourseTemplateFile(schoolId);
+      const tplFile = getLatestCourseTemplateFile(schoolId, logger);
       if (tplFile && fs.existsSync(tplFile)) {
         const tpl = JSON.parse(fs.readFileSync(tplFile, 'utf8'));
         const questions = (tpl && tpl.courseTemplate && tpl.courseTemplate.questions) || {};
         for (const [qid, q] of Object.entries(questions)) {
           if (q && typeof q === 'object') {
-            labelByQid[qid] = q.label || '';
+            labelByQid[qid] = (q as unknown as any).label || '';
           }
         }
       }
@@ -4102,7 +4106,7 @@ async function saveCourseFieldDifferences(beforeValues, afterValues, subfolder, 
       const header = '| Field | Original | New | Status | Comments |\n| --- | --- | --- | --- | --- |';
       const legend = '⏭️ - Skipped field\n\n✅ - Updated field\n\n🔒 - Disabled field\n\n❌ - Unable to update (other reason)';
       const diffText = `${legend}\n\n${header}\n${tableRows.join('\n')}`;
-      console.log('\n=== Course Field Differences (Table) ===\n' + diffText);
+      logger.log('\n=== Course Field Differences (Table) ===\n' + diffText);
 
       const now = new Date();
       const pad = n => n.toString().padStart(2, '0');
@@ -4111,13 +4115,13 @@ async function saveCourseFieldDifferences(beforeValues, afterValues, subfolder, 
       const diffFileName = `${schoolId}-${action}-field-differences-${dateStr}.txt`;
       const diffFilePath = path.join(subfolder, diffFileName);
       fs.writeFileSync(diffFilePath, diffText, 'utf8');
-      console.log(`💾 Field differences saved to: ${diffFilePath}`);
+      logger.log(`💾 Field differences saved to: ${diffFilePath}`);
     } else {
-      console.log('\n✅ No field differences detected.');
+      logger.log('\n✅ No field differences detected.');
     }
 
   } catch (error) {
-    console.error('❌ Error saving course field differences:', error.message);
+    logger.error('❌ Error saving course field differences:', error.message);
   }
 }
 
@@ -4129,9 +4133,9 @@ async function saveCourseFieldDifferences(beforeValues, afterValues, subfolder, 
  * @param {Object} browser - Playwright browser object
  * @returns {boolean} - True if save was successful
  */
-async function saveCourse(page, subfolder, schoolId, browser = null) {
+async function saveCourse(page, subfolder, schoolId, browser = null, logger: ILogger) {
   try {
-    console.log('💾 Attempting to save course...');
+    logger.log('💾 Attempting to save course...');
 
     // Look for common save button selectors
     const saveSelectors = [
@@ -4148,13 +4152,13 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
       const button = page.locator(selector).first();
       if (await button.count() > 0 && await button.isVisible()) {
         saveButton = button;
-        console.log(`✅ Found save button with selector: ${selector}`);
+        logger.log(`✅ Found save button with selector: ${selector}`);
         break;
       }
     }
 
     if (!saveButton) {
-      console.log('⚠️ No save button found - course changes may not be saved');
+      logger.log('⚠️ No save button found - course changes may not be saved');
 
       // Offer user takeover for missing save button
       if (browser && schoolId) {
@@ -4163,12 +4167,12 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
           const takeoverResult = await offerUserTakeover(page, browser, subfolder, 'course-save', schoolId, 'updateCourse', 'No save button found for course', null, true);
           if (takeoverResult.success) {
             if (takeoverResult.sectionSaved) {
-              console.log('✅ User intervention successful - course saved manually (modal closed)');
+              logger.log('✅ User intervention successful - course saved manually (modal closed)');
             } else {
-              console.log('✅ User intervention successful - course saved manually');
+              logger.log('✅ User intervention successful - course saved manually');
             }
             if (takeoverResult.sectionChanged) {
-              console.log('ℹ️ Course/section change detected during intervention');
+              logger.log('ℹ️ Course/section change detected during intervention');
             }
             return true;
           }
@@ -4181,7 +4185,7 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
     // Check if save button is disabled
     const isDisabled = await saveButton.getAttribute('disabled') !== null;
     if (isDisabled) {
-      console.log('❌ Save button is disabled');
+      logger.log('❌ Save button is disabled');
 
       // Offer user takeover for disabled save button
       if (browser && schoolId) {
@@ -4190,12 +4194,12 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
           const takeoverResult = await offerUserTakeover(page, browser, subfolder, 'course-save', schoolId, 'updateCourse', 'Save button is disabled', null, true);
           if (takeoverResult.success) {
             if (takeoverResult.sectionSaved) {
-              console.log('✅ User intervention successful - course saved manually (modal closed)');
+              logger.log('✅ User intervention successful - course saved manually (modal closed)');
             } else {
-              console.log('✅ User intervention successful - course saved manually');
+              logger.log('✅ User intervention successful - course saved manually');
             }
             if (takeoverResult.sectionChanged) {
-              console.log('ℹ️ Course/section change detected during intervention');
+              logger.log('ℹ️ Course/section change detected during intervention');
             }
             return true;
           }
@@ -4207,25 +4211,25 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
 
     // Before clicking save, attempt to pre-fill any empty required fields
     try {
-      await preFillRequiredEmptyFields(page);
+      await preFillRequiredEmptyFields(page, logger);
     } catch (_) { }
 
     // Click the save button
     await saveButton.click();
-    console.log('🔄 Save button clicked, checking for immediate form errors...');
+    logger.log('🔄 Save button clicked, checking for immediate form errors...');
     await page.waitForTimeout(1500);
 
     // Check for specific form errors banner that appears after clicking save
     const formErrorsBanner = page.locator('#form-errors-summary.alert.alert-danger[role="alert"]');
     if ((await formErrorsBanner.count()) > 0 && await formErrorsBanner.first().isVisible()) {
-      console.log('❌ Form errors banner detected after save click');
+      logger.log('❌ Form errors banner detected after save click');
       // Take error screenshot
       const bannerErrorScreenshotPath = path.join(subfolder, `${schoolId}-updateCourse-course-save-error.png`);
       await page.screenshot({
         path: bannerErrorScreenshotPath,
         fullPage: true
       });
-      console.log(`📸 Error screenshot saved: ${bannerErrorScreenshotPath}`);
+      logger.log(`📸 Error screenshot saved: ${bannerErrorScreenshotPath}`);
 
       // Offer user takeover so they can correct errors and continue
       if (browser && schoolId) {
@@ -4234,12 +4238,12 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
           const takeoverResult = await offerUserTakeover(page, browser, subfolder, 'course-save', schoolId, 'updateCourse', 'Form errors displayed after attempting to save course', null, true);
           if (takeoverResult.success) {
             if (takeoverResult.sectionSaved) {
-              console.log('✅ User intervention successful - course saved manually (modal closed)');
+              logger.log('✅ User intervention successful - course saved manually (modal closed)');
             } else {
-              console.log('✅ User intervention successful - course saved manually');
+              logger.log('✅ User intervention successful - course saved manually');
             }
             if (takeoverResult.sectionChanged) {
-              console.log('ℹ️ Course/section change detected during intervention');
+              logger.log('ℹ️ Course/section change detected during intervention');
             }
             return true;
           }
@@ -4254,7 +4258,7 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
     // Explicitly treat green success integration banner as a successful save
     const successSyncBanner = page.locator('[data-test="integrationSyncStatus"].alert-success');
     if ((await successSyncBanner.count()) > 0 && await successSyncBanner.first().isVisible()) {
-      console.log('✅ Integration status banner indicates successful sync; treating save as successful');
+      logger.log('✅ Integration status banner indicates successful sync; treating save as successful');
       return true;
     }
 
@@ -4269,7 +4273,7 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
     for (const errorSelector of errorSelectors) {
       const errorElement = page.locator(errorSelector);
       if (await errorElement.count() > 0 && await errorElement.isVisible()) {
-        console.log('❌ Error detected after save attempt');
+        logger.log('❌ Error detected after save attempt');
 
         // Take error screenshot
         const errorScreenshotPath = path.join(subfolder, `${schoolId}-updateCourse-save-error.png`);
@@ -4277,7 +4281,7 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
           path: errorScreenshotPath,
           fullPage: true
         });
-        console.log(`📸 Error screenshot saved: ${errorScreenshotPath}`);
+        logger.log(`📸 Error screenshot saved: ${errorScreenshotPath}`);
 
         // Offer user takeover for save errors
         if (browser && schoolId) {
@@ -4286,12 +4290,12 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
             const takeoverResult = await offerUserTakeover(page, browser, subfolder, 'course-save', schoolId, 'updateCourse', 'Error detected after attempting to save course', null, true);
             if (takeoverResult.success) {
               if (takeoverResult.sectionSaved) {
-                console.log('✅ User intervention successful - course saved manually (modal closed)');
+                logger.log('✅ User intervention successful - course saved manually (modal closed)');
               } else {
-                console.log('✅ User intervention successful - course saved manually');
+                logger.log('✅ User intervention successful - course saved manually');
               }
               if (takeoverResult.sectionChanged) {
-                console.log('ℹ️ Course/section change detected during intervention');
+                logger.log('ℹ️ Course/section change detected during intervention');
               }
               return true;
             }
@@ -4303,17 +4307,17 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
     }
 
     // Check for API error notification
-    const apiError = await checkForApiError(page, subfolder, browser, schoolId, 'course-save');
+    const apiError = await checkForApiError(page, subfolder, browser, schoolId, 'course-save', logger);
     if (apiError) {
-      console.log('❌ API error detected, course save failed due to template issue');
+      logger.log('❌ API error detected, course save failed due to template issue');
       return false;
     }
 
-    console.log('✅ Course appears to have been saved successfully');
+    logger.log('✅ Course appears to have been saved successfully');
     return true;
 
   } catch (error) {
-    console.error('❌ Error during course save:', error.message);
+    logger.error('❌ Error during course save:', error.message);
 
     // Offer user takeover for unexpected errors
     if (browser && schoolId) {
@@ -4322,12 +4326,12 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
         const takeoverResult = await offerUserTakeover(page, browser, subfolder, 'course-save', schoolId, 'updateCourse', `Unexpected error during save: ${error.message}`, null, true);
         if (takeoverResult.success) {
           if (takeoverResult.sectionSaved) {
-            console.log('✅ User intervention successful - course saved manually (modal closed)');
+            logger.log('✅ User intervention successful - course saved manually (modal closed)');
           } else {
-            console.log('✅ User intervention successful - course saved manually');
+            logger.log('✅ User intervention successful - course saved manually');
           }
           if (takeoverResult.sectionChanged) {
-            console.log('ℹ️ Course/section change detected during intervention');
+            logger.log('ℹ️ Course/section change detected during intervention');
           }
           return true;
         }
@@ -4338,13 +4342,14 @@ async function saveCourse(page, subfolder, schoolId, browser = null) {
   }
 }
 
-module.exports = {
+export {
   createCourse,
-  updateCourse,
-  readCourseValues,
   fillCourseTemplate,
   getLatestCourseTemplateFile,
-  saveCourseFieldDifferences,
+  readCourseValues,
   saveCourse,
-  screenshotCourseForm
+  saveCourseFieldDifferences,
+  screenshotCourseForm,
+  updateCourse
 };
+

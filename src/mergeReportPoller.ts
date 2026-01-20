@@ -1,7 +1,8 @@
-const axios = require('axios');
-const fs = require('fs');
-const path = require('path');
-const { appendRunSummary, extractStepsStatus, extractErrors, extractMetadataDifferences, generateRunId } = require('./runSummary');
+import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { appendRunSummary, extractErrors, extractStepsStatus, generateRunId } from './runSummary';
+import type { ILogger } from './services/interfaces/ILogger';
 
 let mergeStartTime = null; // Stopwatch start time
 
@@ -12,7 +13,7 @@ let mergeStartTime = null; // Stopwatch start time
  * @param {string} act - Action type ('update', 'create', 'createNoMeetNoProf', 'relationships', 'editRelationships', 'createRelationships')
  * @returns {Promise<Object>} - Object containing mergeReportId, mergeReportStatus, totalCount, and mergeHistoryUrl
  */
-async function pollMergeReport(env, schoolId, act) {
+async function pollMergeReport(env, schoolId, act, logger: ILogger) {
   const baseUrl = env === 'prd'
     ? 'https://app.coursedog.com'
     : 'https://staging.coursedog.com';
@@ -21,21 +22,21 @@ async function pollMergeReport(env, schoolId, act) {
   let apiUrl;
   if (act === 'relationships' || act === 'editRelationships' || act === 'createRelationships') {
     apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=relationships`;
-    console.log(`🔗 [Relationships] Using relationships entity type for ${act} action`);
+    logger.log(`🔗 [Relationships] Using relationships entity type for ${act} action`);
   } else if (act === 'createProgram' || act === 'updateProgram') {
     apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=programs`;
-    console.log(`📚 [Programs] Using programs entity type for ${act} action`);
+    logger.log(`📚 [Programs] Using programs entity type for ${act} action`);
   } else if (act === 'updateCourse' || act === 'createCourse' || act === 'inactivateCourse' || act === 'newCourseRevision') {
     apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=coursesCm`;
-    console.log(`📚 [Curriculum Management] Using coursesCm entity type for ${act} action`);
+    logger.log(`📚 [Curriculum Management] Using coursesCm entity type for ${act} action`);
   } else {
     apiUrl = `${baseUrl}/api/v1/int/${schoolId}/integrations-hub/merge-history?page=0&size=1&scheduleType=realtime&entityType=sections`;
-    console.log(`📚 [Sections] Using sections entity type for ${act} action`);
+    logger.log(`📚 [Sections] Using sections entity type for ${act} action`);
   }
 
   // Wait 1 minute before first poll
-  console.log('⏳ Waiting 1 minute before polling merge status...');
-  console.log(`API URL: ${apiUrl}`);
+  logger.log('⏳ Waiting 1 minute before polling merge status...');
+  logger.log(`API URL: ${apiUrl}`);
   await new Promise(resolve => setTimeout(resolve, 60000));
 
   let lastStatus = null;
@@ -45,7 +46,7 @@ async function pollMergeReport(env, schoolId, act) {
   while (true) {
     try {
       // Always get a fresh token before each API call
-      const token = await getAuthToken(env, schoolId);
+      const token = await getAuthToken(env, schoolId, logger);
       const headers = {
         'Accept': 'application/json, text/plain, */*',
         'Authorization': `Bearer ${token}`,
@@ -68,7 +69,7 @@ async function pollMergeReport(env, schoolId, act) {
         const status = firstItem.inProgressMerge.awsJobStatus;
         const jobId = firstItem.inProgressMerge.awsJobId;
         const jobName = firstItem.inProgressMerge.awsJobName;
-        console.log(`🔄 Merge in progress. Status: ${status}, JobId: ${jobId}, JobName: ${jobName}`);
+        logger.log(`🔄 Merge in progress. Status: ${status}, JobId: ${jobId}, JobName: ${jobName}`);
         lastStatus = status;
         lastJobId = jobId;
         // If still in progress, wait and poll again
@@ -83,10 +84,10 @@ async function pollMergeReport(env, schoolId, act) {
         const mergeReportId = report.id || report._id;
         const mergeReportStatus = report.status;
         const mergeHistoryUrl = `${baseUrl}/#/int/${schoolId}/merge-history/${mergeReportId}`;
-        console.log('🎉 Merge report finished!');
-        console.log('📋 mergeReportId:', mergeReportId);
-        console.log('⏰ Merge Report Status:', mergeReportStatus);
-        console.log('🔗 Merge Report URL:', mergeHistoryUrl);
+        logger.log('🎉 Merge report finished!');
+        logger.log('📋 mergeReportId:', mergeReportId);
+        logger.log('⏰ Merge Report Status:', mergeReportStatus);
+        logger.log('🔗 Merge Report URL:', mergeHistoryUrl);
         return {
           mergeReportId,
           mergeReportStatus,
@@ -95,13 +96,13 @@ async function pollMergeReport(env, schoolId, act) {
       }
 
       // If neither, wait and poll again
-      console.log('⏳ No merge report yet, polling again in 1 minute...');
+      logger.log('⏳ No merge report yet, polling again in 1 minute...');
       await new Promise(resolve => setTimeout(resolve, 60000));
     } catch (error) {
-      console.error('❌ Error polling merge status:', error.message);
+      logger.error('❌ Error polling merge status:', error.message);
       if (error.response) {
-        console.error('Response status:', error.response.status);
-        console.error('Response data:', error.response.data);
+        logger.error('Response status:', error.response.status);
+        logger.error('Response data:', error.response.data);
       }
       // Wait and try again
       await new Promise(resolve => setTimeout(resolve, 15000));
@@ -117,10 +118,10 @@ async function pollMergeReport(env, schoolId, act) {
  * @param {boolean} isSecondRun - Whether this is the second run (for relationships)
  * @returns {Promise<Object>} - Object containing mergeReportId, mergeReportStatus, totalCount, and mergeHistoryUrl
  */
-async function startMergeReportPolling(env, schoolId, act, outputDir, isSecondRun = false) {
+async function startMergeReportPolling(env, schoolId, act, outputDir, isSecondRun = false, logger: ILogger) {
 
-  const mergeReportData = await pollMergeReport(env, schoolId, act);
-  await getMergeReportDetails(env, schoolId, mergeReportData.mergeReportId, act, outputDir, isSecondRun);
+  const mergeReportData = await pollMergeReport(env, schoolId, act, logger);
+  await getMergeReportDetails(env, schoolId, mergeReportData.mergeReportId, act, outputDir, isSecondRun, logger);
   return mergeReportData;
 }
 
@@ -133,7 +134,7 @@ async function startMergeReportPolling(env, schoolId, act, outputDir, isSecondRu
  * @param {boolean} isSecondRun - Whether this is the second run (for relationships)
  * @returns {Promise<Object>} - The merge report details object
  */
-async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDir, isSecondRun = false) {
+async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDir, isSecondRun = false, logger: ILogger) {
   const baseUrl = env === 'prd'
     ? 'https://app.coursedog.com/api/v1'
     : 'https://staging.coursedog.com/api/v1';
@@ -141,7 +142,7 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
   const url = `${baseUrl}/${schoolId}/mergeReports/${mergeReportId}`;
 
   // Always get a fresh token before each API call
-  const token = await getAuthToken(env, schoolId);
+  const token = await getAuthToken(env, schoolId, logger);
   const headers = {
     'Authorization': `Bearer ${token}`,
     'Accept': 'application/json',
@@ -155,7 +156,7 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     const data = response.data;
 
     // Extract summary (ordered, exclude _id, mergeGroupId, timestampStart)
-    const summary = {};
+    const summary = {} as unknown as any;
     const orderedKeys = ['id', 'schoolName', 'status', 'date', 'type', 'termCode', 'scheduleType'];
     for (const key of orderedKeys) {
       if (data[key] !== undefined) summary[key] = data[key];
@@ -171,13 +172,13 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     //const fileName = `${schoolId}-sections-${act}${isSecondRun ? '-create' : ''}-mergeReportDetails.json`;
     //const filePath = path.join(outputDir, fileName);
     //fs.writeFileSync(filePath, JSON.stringify(result, null, 2));
-    //console.log(`✅ Saved merge report summary and steps to ${filePath}`);
+    //logger.log(`✅ Saved merge report summary and steps to ${filePath}`);
 
     // --- Create Markdown summary file ---
     let markdown = '## Merge Report Summary\n\n';
     // Add summary as JSON code block with conflictHandlingMethod before mergeReportURL
     const conflictHandlingMethod = data?.configuration?.conflictHandlingMethod;
-    const summaryWithUrl = { ...summary };
+    const summaryWithUrl = { ...summary } as unknown as any;
     if (conflictHandlingMethod !== undefined) {
       summaryWithUrl.conflictHandlingMethod = conflictHandlingMethod;
     }
@@ -348,27 +349,27 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     {
       const baseHost = baseUrl.replace('/api/v1', '');
       const sisUrl = `${baseHost}/api/v1/${schoolId}/integration/getMergeReportBackup?backupType=resulting-sis-data&getHeadInfo=false&mergeReportId=${encodeURIComponent(mergeReportId)}`;
-      console.log(`API URL: ${sisUrl}`);
+      logger.log(`API URL: ${sisUrl}`);
       const maxAttempts = 3;
       let lastErr = null;
       let sisData = null;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           // Get fresh token before each attempt
-          console.log(`🔐 Re-authenticating for GET after POST attempt ${attempt}/${maxAttempts}...`);
-          const freshToken = await getAuthToken(env, schoolId);
+          logger.log(`🔐 Re-authenticating for GET after POST attempt ${attempt}/${maxAttempts}...`);
+          const freshToken = await getAuthToken(env, schoolId, logger);
           const sisHeaders = {
             'Authorization': `Bearer ${freshToken}`,
             'Accept': 'application/json'
           };
 
-          console.log(`🔁 GET after POST attempt ${attempt}/${maxAttempts}...`);
+          logger.log(`🔁 GET after POST attempt ${attempt}/${maxAttempts}...`);
           const sisResp = await axios.get(sisUrl, { headers: sisHeaders });
           sisData = sisResp.data;
           break;
         } catch (err) {
           lastErr = err;
-          console.log(`⚠️ GET after POST failed (attempt ${attempt}): ${err && err.message ? err.message : err}`);
+          logger.log(`⚠️ GET after POST failed (attempt ${attempt}): ${err && err.message ? err.message : err}`);
           if (attempt < maxAttempts) {
             const delayMs = attempt * 5000; // 5s, 10s
             await new Promise(r => setTimeout(r, delayMs));
@@ -394,7 +395,7 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
           markdown += '_No formattedData found in response._\n';
         }
       } else {
-        console.error('❌ Failed GET after POST (resulting-sis-data) after retries:', lastErr && lastErr.message ? lastErr.message : lastErr);
+        logger.error('❌ Failed GET after POST (resulting-sis-data) after retries:', lastErr && lastErr.message ? lastErr.message : lastErr);
         markdown += '_Failed to fetch resulting-sis-data after retries._\n';
       }
     }
@@ -402,8 +403,8 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
     const mdFileName = `${schoolId}-sections-${act}${isSecondRun ? '-create' : ''}-mergeReportSummary.md`;
     const mdFilePath = path.join(outputDir, mdFileName);
     fs.writeFileSync(mdFilePath, markdown, 'utf8');
-    console.log(`✅ Saved merge report markdown summary to ${mdFilePath}`);
-    //console.dir(result, { depth: null, colors: true });
+    logger.log(`✅ Saved merge report markdown summary to ${mdFilePath}`);
+    //logger.dir(result, { depth: null, colors: true });
 
     // --- Create Run Summary Entry ---
     try {
@@ -438,31 +439,32 @@ async function getMergeReportDetails(env, schoolId, mergeReportId, act, outputDi
         currentDate,
         schoolId,
         act,
-        errors
+        errors,
+        logger,
       );
     } catch (summaryError) {
-      console.error('❌ Failed to create run summary entry:', summaryError.message);
+      logger.error('❌ Failed to create run summary entry:', summaryError.message);
       // Don't throw - this shouldn't stop the main process
     }
 
     // Stopwatch: log elapsed time in seconds
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
-    console.log(`⏱️ Merge process took ${elapsed} seconds.`);
-    console.log('\n =================== END OF RUN =================== \n');
+    logger.log(`⏱️ Merge process took ${elapsed} seconds.`);
+    logger.log('\n =================== END OF RUN =================== \n');
     mergeStartTime = null;
 
     return result;
   } catch (error) {
-    console.error('❌ Failed to fetch merge report details:', error.message);
+    logger.error('❌ Failed to fetch merge report details:', error.message);
     if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
+      logger.error('Response status:', error.response.status);
+      logger.error('Response data:', error.response.data);
     }
     throw error;
   }
 }
 
-async function getAuthToken(env, schoolId) {
+async function getAuthToken(env, schoolId, logger: ILogger) {
   const baseUrl = env === 'prd'
     ? 'https://app.coursedog.com'
     : 'https://staging.coursedog.com';
@@ -493,12 +495,12 @@ async function getAuthToken(env, schoolId) {
   };
 
   try {
-    console.log(`🔐 Re-authenticating...`);
+    logger.log(`🔐 Re-authenticating...`);
 
     const response = await axios.post(url, body, { headers });
 
     if (response.data && response.data.token) {
-      console.log('✅ Authentication successful');
+      logger.log('✅ Authentication successful');
       const token = response.data.token;
 
       // Fetch section template after successful authentication
@@ -509,17 +511,18 @@ async function getAuthToken(env, schoolId) {
       throw new Error('No token received in response');
     }
   } catch (error) {
-    console.error('❌ Authentication failed:', error.message);
+    logger.error('❌ Authentication failed:', error.message);
     if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
+      logger.error('Response status:', error.response.status);
+      logger.error('Response data:', error.response.data);
     }
     throw error;
   }
 }
 
-module.exports = {
+export {
+  getMergeReportDetails,
   pollMergeReport,
-  startMergeReportPolling,
-  getMergeReportDetails
-}; 
+  startMergeReportPolling
+};
+

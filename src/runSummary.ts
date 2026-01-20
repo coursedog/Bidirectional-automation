@@ -1,5 +1,6 @@
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import type { ILogger } from './services/interfaces/ILogger';
 
 /**
  * Appends a run summary entry to the markdown file in the Run root folder
@@ -13,7 +14,7 @@ const path = require('path');
  * @param {string} action - Action type (update, create, etc.)
  * @param {string} errors - Errors from merge report (optional)
  */
-async function appendRunSummary(runFolder, id, mergeReportURL, status, mergeReportStatus, date, schoolId, action, errors = 'N/A') {
+async function appendRunSummary(runFolder, id, mergeReportURL, status, mergeReportStatus, date, schoolId, action, errors = 'N/A', logger: ILogger) {
   try {
     // Create filename with timestamp for uniqueness
     const summaryFileName = `RUN-SUMMARY-${schoolId}.md`;
@@ -80,10 +81,10 @@ async function appendRunSummary(runFolder, id, mergeReportURL, status, mergeRepo
     // Write the updated content
     fs.writeFileSync(summaryFilePath, fileContent, 'utf8');
 
-    console.log(`✅ Run summary appended to: ${summaryFilePath}`);
+    logger.log(`✅ Run summary appended to: ${summaryFilePath}`);
     return summaryFilePath;
   } catch (error) {
-    console.error('❌ Error creating run summary:', error.message);
+    logger.error('❌ Error creating run summary:', error.message);
     throw error;
   }
 }
@@ -185,10 +186,11 @@ function generateRunId(action) {
   return `${action}-${timestamp}`;
 }
 
-module.exports = {
+export {
   appendRunSummary,
-  extractStepsStatus,
   extractErrors,
   extractMetadataDifferences,
+  extractStepsStatus,
   generateRunId
 };
+

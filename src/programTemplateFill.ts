@@ -1,20 +1,21 @@
-const fs = require('fs');
-const path = require('path');
-const { saveCourse, screenshotCourseForm } = require('./courseTemplateFill');
-const { ensureRunLogger } = require('./sectionTemplateFill');
-const { offerUserTakeover, waitForUserResponseWithTimeout } = require('./userTakeover');
+import fs from 'fs';
+import path from 'path';
+import { saveCourse, screenshotCourseForm } from './courseTemplateFill';
+import { ensureRunLogger } from './sectionTemplateFill';
+import type { ILogger } from './services/interfaces/ILogger';
+import { offerUserTakeover, waitForUserResponseWithTimeout } from './userTakeover';
 
 const DEFAULT_PROGRAM_FORM_NAME = 'Propose New Program';
 
-async function createProgram(page, subfolder, schoolId, browser = null, formName = DEFAULT_PROGRAM_FORM_NAME) {
+async function createProgram(page, subfolder, schoolId, browser = null, formName = DEFAULT_PROGRAM_FORM_NAME, logger: ILogger) {
   try {
-    ensureRunLogger(subfolder);
-    console.log('\n🎯 Starting Program creation...');
+    ensureRunLogger(subfolder, logger);
+    logger.log('\n🎯 Starting Program creation...');
     await page.waitForSelector('[data-test="proposeNewProgramBtn"]', { timeout: 30000 });
     const proposeButton = page.locator('[data-test="proposeNewProgramBtn"]').first();
     await proposeButton.click();
 
-    await selectProgramForm(page, formName);
+    await selectProgramForm(page, formName, logger);
 
     const submitButton = page.locator('[data-test="submitNewProgramBtn"]').first();
     await submitButton.waitFor({ state: 'visible', timeout: 30000 });
@@ -22,117 +23,117 @@ async function createProgram(page, subfolder, schoolId, browser = null, formName
 
     await waitForProgramForm(page);
     await ensureSpecializationEntry(page);
-    await fillProgramTemplate(page, schoolId, 'createProgram');
-    await enforcePeopleSoftRequirements(page);
+    await fillProgramTemplate(page, schoolId, 'createProgram', logger);
+    await enforcePeopleSoftRequirements(page, logger);
 
     const createScreenshotPath = path.join(subfolder, `${schoolId}-createProgram-form-before.png`);
-    await captureProgramScreenshot(page, 'Taking screenshot before saving program proposal...', createScreenshotPath);
+    await captureProgramScreenshot(page, 'Taking screenshot before saving program proposal...', createScreenshotPath, logger);
 
     // Try to submit the program proposal
-    const submitted = await submitProgram(page, subfolder, schoolId, browser);
+    const submitted = await submitProgram(page, subfolder, schoolId, browser, logger);
     if (submitted) {
-      console.log('✅ Program creation and submission completed successfully.');
+      logger.log('✅ Program creation and submission completed successfully.');
       return true;
     }
 
     // If submit didn't work, fall back to saveCourse
-    console.log('⚠️ Submit Proposal not available, trying regular save...');
-    const saved = await saveCourse(page, subfolder, schoolId, browser);
+    logger.log('⚠️ Submit Proposal not available, trying regular save...');
+    const saved = await saveCourse(page, subfolder, schoolId, browser, logger);
     if (saved) {
-      console.log('✅ Program creation flow completed successfully via save.');
+      logger.log('✅ Program creation flow completed successfully via save.');
     } else {
-      console.log('⚠️ Program creation finished but saving failed.');
+      logger.log('⚠️ Program creation finished but saving failed.');
     }
     return saved;
   } catch (error) {
-    console.error('❌ Error in createProgram:', error.message);
+    logger.error('❌ Error in createProgram:', error.message);
     throw error;
   }
 }
 
-async function updateProgram(page, subfolder, schoolId, browser = null) {
+async function updateProgram(page, subfolder, schoolId, browser = null, logger: ILogger) {
   try {
-    ensureRunLogger(subfolder);
-    console.log('\n📝 Starting Program update...');
+    ensureRunLogger(subfolder, logger);
+    logger.log('\n📝 Starting Program update...');
     await findAndOpenActiveProgram(page);
     await clickEditProgram(page);
 
     await waitForProgramForm(page);
     await ensureSpecializationEntry(page);
     const updateBeforeScreenshotPath = path.join(subfolder, `${schoolId}-updateProgram-form-before.png`);
-    await captureProgramScreenshot(page, 'Taking screenshot before modifying program...', updateBeforeScreenshotPath);
-    await fillProgramTemplate(page, schoolId, 'updateProgram');
-    await enforcePeopleSoftRequirements(page);
+    await captureProgramScreenshot(page, 'Taking screenshot before modifying program...', updateBeforeScreenshotPath, logger);
+    await fillProgramTemplate(page, schoolId, 'updateProgram', logger);
+    await enforcePeopleSoftRequirements(page, logger);
     const updateAfterScreenshotPath = path.join(subfolder, `${schoolId}-updateProgram-form-after.png`);
-    await captureProgramScreenshot(page, 'Taking screenshot after modifying program...', updateAfterScreenshotPath);
+    await captureProgramScreenshot(page, 'Taking screenshot after modifying program...', updateAfterScreenshotPath, logger);
 
     // Try to submit the program proposal
-    const submitted = await submitProgram(page, subfolder, schoolId, browser);
+    const submitted = await submitProgram(page, subfolder, schoolId, browser, logger);
     if (submitted) {
-      console.log('✅ Program update and submission completed successfully.');
+      logger.log('✅ Program update and submission completed successfully.');
       return true;
     }
 
     // If submit didn't work, fall back to saveCourse
-    console.log('⚠️ Submit Proposal not available, trying regular save...');
-    const saved = await saveCourse(page, subfolder, schoolId, browser);
+    logger.log('⚠️ Submit Proposal not available, trying regular save...');
+    const saved = await saveCourse(page, subfolder, schoolId, browser, logger);
     if (saved) {
-      console.log('✅ Program update flow completed successfully via save.');
+      logger.log('✅ Program update flow completed successfully via save.');
     } else {
-      console.log('⚠️ Program update finished but saving failed.');
+      logger.log('⚠️ Program update finished but saving failed.');
     }
     return saved;
   } catch (error) {
-    console.error('❌ Error in updateProgram:', error.message);
+    logger.error('❌ Error in updateProgram:', error.message);
     throw error;
   }
 }
 
-async function selectProgramForm(page, formName) {
+async function selectProgramForm(page, formName, logger: ILogger) {
   // Wait for the "Add new program" modal to appear and animation to settle
-  console.log('⏳ Waiting for Add new program modal...');
+  logger.log('⏳ Waiting for Add new program modal...');
   await page.waitForSelector('text=Add new program', { timeout: 30000 });
   await page.waitForTimeout(500); // Allow modal animation to complete
-  console.log('✅ Add new program modal appeared');
+  logger.log('✅ Add new program modal appeared');
 
   // Click on the form selection dropdown using the data-test attribute for specificity
-  console.log('🔍 Looking for form selection dropdown...');
+  logger.log('🔍 Looking for form selection dropdown...');
   const formSelectContainer = page.locator('[data-test="newProgramFormSelect"]');
   await formSelectContainer.waitFor({ state: 'visible', timeout: 30000 });
 
   const formSelectWrapper = formSelectContainer.locator('.multiselect').first();
   await formSelectWrapper.waitFor({ state: 'visible', timeout: 30000 });
-  console.log('✅ Form selection dropdown found');
+  logger.log('✅ Form selection dropdown found');
 
-  console.log('🖱️ Clicking form selection dropdown...');
+  logger.log('🖱️ Clicking form selection dropdown...');
   await formSelectWrapper.click();
   await page.waitForTimeout(1000); // Wait for dropdown to open
-  console.log('✅ Form selection dropdown opened');
+  logger.log('✅ Form selection dropdown opened');
 
   // Select the specified form option
-  console.log(`🔍 Looking for "${formName}" option...`);
+  logger.log(`🔍 Looking for "${formName}" option...`);
   const exactOption = page.locator(`[aria-label="${formName}"]`).first();
   if ((await exactOption.count()) > 0 && (await exactOption.isVisible())) {
-    console.log(`✅ "${formName}" option found`);
-    console.log(`🖱️ Selecting "${formName}" option...`);
+    logger.log(`✅ "${formName}" option found`);
+    logger.log(`🖱️ Selecting "${formName}" option...`);
     await exactOption.click();
-    console.log(`✅ "${formName}" option selected`);
+    logger.log(`✅ "${formName}" option selected`);
     return;
   }
 
   const fuzzyOption = page.locator('.multiselect__option').filter({ hasText: formName }).first();
   if ((await fuzzyOption.count()) > 0 && (await fuzzyOption.isVisible())) {
-    console.log(`✅ Found option matching "${formName}" (fuzzy)`);
+    logger.log(`✅ Found option matching "${formName}" (fuzzy)`);
     await fuzzyOption.click();
-    console.log(`✅ Option selected`);
+    logger.log(`✅ Option selected`);
     return;
   }
 
-  console.log(`⚠️ Could not find "${formName}", selecting first available option...`);
+  logger.log(`⚠️ Could not find "${formName}", selecting first available option...`);
   const fallback = page.locator('.multiselect__option').first();
   if ((await fallback.count()) > 0 && (await fallback.isVisible())) {
     await fallback.click();
-    console.log('✅ Fallback option selected');
+    logger.log('✅ Fallback option selected');
   }
 }
 
@@ -142,15 +143,15 @@ async function waitForProgramForm(page) {
   await page.waitForTimeout(2000);
 }
 
-async function enforcePeopleSoftRequirements(page) {
-  await ensureProgramDepartmentOwnershipSetup(page);
+async function enforcePeopleSoftRequirements(page, logger: ILogger) {
+  await ensureProgramDepartmentOwnershipSetup(page, logger);
 }
 
-async function ensureProgramDepartmentOwnershipSetup(page) {
+async function ensureProgramDepartmentOwnershipSetup(page, logger: ILogger) {
   await ensureSplitOwnershipYes(page);
   await ensureDepartmentOwnershipYes(page);
-  await ensureTwoDepartments(page);
-  await ensureDepartmentOwnershipPercentages(page);
+  await ensureTwoDepartments(page, logger);
+  await ensureDepartmentOwnershipPercentages(page, logger);
 }
 
 async function ensureSplitOwnershipYes(page) {
@@ -160,7 +161,7 @@ async function ensureSplitOwnershipYes(page) {
   }
 }
 
-async function ensureTwoDepartments(page) {
+async function ensureTwoDepartments(page, logger: ILogger) {
   const field = page.locator('#field-departments');
   if ((await field.count()) === 0) return;
   const tags = field.locator('.multiselect__tags .multiselect__tag');
@@ -169,7 +170,7 @@ async function ensureTwoDepartments(page) {
 
   let selected = await tags.count();
   if (selected >= 2) {
-    console.log('ℹ️ Departments already have at least two entries');
+    logger.log('ℹ️ Departments already have at least two entries');
     return;
   }
 
@@ -183,7 +184,7 @@ async function ensureTwoDepartments(page) {
   }
 
   if (selected < 2) {
-    console.log('⚠️ Unable to add enough departments automatically');
+    logger.log('⚠️ Unable to add enough departments automatically');
   }
 }
 
@@ -310,14 +311,14 @@ async function ensureSpecializationEntry(page) {
   }
 }
 
-async function ensureDepartmentOwnershipPercentages(page) {
+async function ensureDepartmentOwnershipPercentages(page, logger: ILogger) {
   try {
     // Only set percentages if we truly have 2+ departments selected
     const deptField = page.locator('#field-departments');
     const deptTags = deptField.locator('.multiselect__tags .multiselect__tag');
     const deptCount = (await deptTags.count().catch(() => 0)) || 0;
     if (deptCount < 2) {
-      console.log('ℹ️ Skipping ownership percentages: need at least 2 departments selected');
+      logger.log('ℹ️ Skipping ownership percentages: need at least 2 departments selected');
       return;
     }
 
@@ -338,7 +339,7 @@ async function ensureDepartmentOwnershipPercentages(page) {
       .first();
     const visible = await modal.waitFor({ state: 'visible', timeout: 30000 }).then(() => true).catch(() => false);
     if (!visible) {
-      console.log('⚠️ Percent ownership modal did not appear; skipping');
+      logger.log('⚠️ Percent ownership modal did not appear; skipping');
       return;
     }
 
@@ -360,19 +361,19 @@ async function ensureDepartmentOwnershipPercentages(page) {
     }
     await page.waitForTimeout(500);
   } catch (error) {
-    console.log(`⚠️ ensureDepartmentOwnershipPercentages failed: ${error.message}`);
+    logger.log(`⚠️ ensureDepartmentOwnershipPercentages failed: ${error.message}`);
   }
 }
 
-async function fillProgramTemplate(page, schoolId, action = 'createProgram') {
+async function fillProgramTemplate(page, schoolId, action = 'createProgram', logger: ILogger) {
   try {
-    const templateFile = getLatestProgramTemplateFile(schoolId);
+    const templateFile = getLatestProgramTemplateFile(schoolId, logger);
     if (!templateFile) {
-      console.log('⚠️ No program template file found, skipping template fill');
+      logger.log('⚠️ No program template file found, skipping template fill');
       return;
     }
 
-    console.log(`📋 Using program template file: ${templateFile}`);
+    logger.log(`📋 Using program template file: ${templateFile}`);
     const content = fs.readFileSync(templateFile, 'utf8');
     const template = JSON.parse(content);
     const questions = (template && template.programTemplate && template.programTemplate.questions) || {};
@@ -389,18 +390,18 @@ async function fillProgramTemplate(page, schoolId, action = 'createProgram') {
     let processedCount = 0;
     let skippedCount = 0;
 
-    console.log(`📝 Found ${Object.keys(questions).length} questions in program template`);
+    logger.log(`📝 Found ${Object.keys(questions).length} questions in program template`);
 
     for (const [qid, question] of Object.entries(questions)) {
       // Skip hidden fields
-      if (question.hidden || question.isVisibleInForm === false) {
+      if ((question as unknown as any).hidden || (question as unknown as any).isVisibleInForm === false) {
         skippedCount++;
         continue;
       }
 
       // Skip protected fields
       if (skipFields.includes(qid)) {
-        console.log(`⏭️ Skipping protected field: ${qid}`);
+        logger.log(`⏭️ Skipping protected field: ${qid}`);
         skippedCount++;
         continue;
       }
@@ -411,30 +412,30 @@ async function fillProgramTemplate(page, schoolId, action = 'createProgram') {
       const questionCopy = Object.assign({ qid }, question);
 
       try {
-        await fillProgramField(page, questionCopy, action);
+        await fillProgramField(page, questionCopy, action, logger);
         processedCount++;
       } catch (fieldError) {
-        console.log(`⚠️ Error processing field ${qid}: ${fieldError.message}`);
+        logger.log(`⚠️ Error processing field ${qid}: ${fieldError.message}`);
       }
 
       processed.add(qid);
       await page.waitForTimeout(150);
     }
 
-    await fillSpecializationsCard(page);
+    await fillSpecializationsCard(page, logger);
 
-    console.log(`\n📊 Program Template Fill Summary:`);
-    console.log(`   ┣ Total fields: ${Object.keys(questions).length}`);
-    console.log(`   ┣ Processed: ${processedCount}`);
-    console.log(`   ┗ Skipped: ${skippedCount}`);
-    console.log('✅ Program template fields processed');
+    logger.log(`\n📊 Program Template Fill Summary:`);
+    logger.log(`   ┣ Total fields: ${Object.keys(questions).length}`);
+    logger.log(`   ┣ Processed: ${processedCount}`);
+    logger.log(`   ┗ Skipped: ${skippedCount}`);
+    logger.log('✅ Program template fields processed');
   } catch (error) {
-    console.error('❌ Error filling program template:', error.message);
+    logger.error('❌ Error filling program template:', error.message);
     throw error;
   }
 }
 
-async function fillSpecializationsCard(page) {
+async function fillSpecializationsCard(page, logger: ILogger) {
   try {
     const card = page.locator('#field-specializations');
     if ((await card.count()) === 0) return;
@@ -462,7 +463,7 @@ async function fillSpecializationsCard(page) {
       const selector = `#field-specializations\\.${specIndex}\\.${entry.field}`;
       const wrapper = page.locator(selector).first();
       if ((await wrapper.count()) === 0) continue;
-      await fillTextField(page, wrapper, entry.value, { qid: `${qidBase}.${entry.field}` });
+      await fillTextField(page, wrapper, entry.value, { qid: `${qidBase}.${entry.field}` }, logger);
       await page.waitForTimeout(100);
     }
 
@@ -481,7 +482,7 @@ async function fillSpecializationsCard(page) {
     for (const fieldName of multiFields) {
       const wrapper = page.locator(`#field-specializations\\.${specIndex}\\.${fieldName}`).first();
       if ((await wrapper.count()) === 0) continue;
-      await fillMultiSelectField(page, wrapper, { qid: `${qidBase}.${fieldName}` });
+      await fillMultiSelectField(page, wrapper, { qid: `${qidBase}.${fieldName}` }, logger);
       await page.waitForTimeout(100);
     }
 
@@ -491,7 +492,7 @@ async function fillSpecializationsCard(page) {
       if ((await wrapper.count()) === 0) continue;
       const fieldset = wrapper.locator('fieldset').first();
       const target = (await fieldset.count()) > 0 ? fieldset : wrapper.first();
-      await fillYesNoField(page, target, { qid: `${qidBase}.${fieldName}` });
+      await fillYesNoField(page, target, { qid: `${qidBase}.${fieldName}` }, logger);
       await page.waitForTimeout(100);
     }
 
@@ -500,27 +501,27 @@ async function fillSpecializationsCard(page) {
     for (const fieldName of dateFields) {
       const wrapper = page.locator(`#field-specializations\\.${specIndex}\\.${fieldName}`).first();
       if ((await wrapper.count()) === 0) continue;
-      await fillDateField(page, wrapper, dateValue);
+      await fillDateField(page, wrapper, dateValue, logger);
       await page.waitForTimeout(100);
     }
   } catch (error) {
-    console.log(`⚠️ Specialization card fill skipped: ${error.message}`);
+    logger.log(`⚠️ Specialization card fill skipped: ${error.message}`);
   }
 }
 
-async function fillProgramField(page, question, action) {
+async function fillProgramField(page, question, action, logger: ILogger) {
   const qid = question.qid;
-  console.log(`🔍 Processing program field: ${qid}`);
+  logger.log(`🔍 Processing program field: ${qid}`);
 
   // Handle effectiveStartDate specially (set to today's date)
   if (qid === 'effectiveStartDate') {
-    await handleEffectiveStartDateForProgram(page, question);
+    await handleEffectiveStartDateForProgram(page, question, logger);
     return;
   }
 
-  const field = await findProgramField(page, qid);
+  const field = await findProgramField(page, qid, logger);
   if (!field) {
-    console.log(`   ┗ ⚠️ Field not found: ${qid}`);
+    logger.log(`   ┗ ⚠️ Field not found: ${qid}`);
     return;
   }
 
@@ -548,18 +549,18 @@ async function fillProgramField(page, question, action) {
     isYesNoButtons = true;
   }
 
-  console.log(`   ┣ Field type analysis: tag=${foundElementTagName}, isMultiselect=${isMultiselect}, isYesNoButtons=${isYesNoButtons}`);
+  logger.log(`   ┣ Field type analysis: tag=${foundElementTagName}, isMultiselect=${isMultiselect}, isYesNoButtons=${isYesNoButtons}`);
 
   // Handle based on detected type (prioritize DOM detection over template type)
   if (isMultiselect) {
-    console.log(`   ┣ Detected multiselect field, selecting from dropdown...`);
-    await fillMultiSelectField(page, field, question);
+    logger.log(`   ┣ Detected multiselect field, selecting from dropdown...`);
+    await fillMultiSelectField(page, field, question, logger);
     return;
   }
 
   if (isYesNoButtons) {
-    console.log(`   ┣ Detected Yes/No button field...`);
-    await fillYesNoField(page, field, question);
+    logger.log(`   ┣ Detected Yes/No button field...`);
+    await fillYesNoField(page, field, question, logger);
     return;
   }
 
@@ -578,7 +579,7 @@ async function fillProgramField(page, question, action) {
       } else {
         value = value.slice(0, maxLen);
       }
-      console.log(`   ┣ ✂️ Clamped value to maxLength(${maxLen}): ${value}`);
+      logger.log(`   ┣ ✂️ Clamped value to maxLength(${maxLen}): ${value}`);
     }
   }
 
@@ -587,30 +588,30 @@ async function fillProgramField(page, question, action) {
     case 'text':
     case 'wysiwyg':
     case 'number':
-      await fillTextField(page, field, value, question);
+      await fillTextField(page, field, value, question, logger);
       break;
     case 'date':
-      await fillDateField(page, field, value);
+      await fillDateField(page, field, value, logger);
       break;
     case 'select':
     case 'dropdown':
-      await fillSelectField(page, field, question);
+      await fillSelectField(page, field, question, logger);
       break;
     case 'multiselect':
-      await fillMultiSelectField(page, field, question);
+      await fillMultiSelectField(page, field, question, logger);
       break;
     case 'boolean':
     case 'checkbox':
     case 'yesNo':
-      await fillYesNoField(page, field, question);
+      await fillYesNoField(page, field, question, logger);
       break;
     default:
-      await fillTextField(page, field, value, question);
+      await fillTextField(page, field, value, question, logger);
       break;
   }
 }
 
-async function findProgramField(page, qid) {
+async function findProgramField(page, qid, logger: ILogger) {
   const escaped = qid.replace(/\./g, '\\.');
   const selectors = [
     // Direct data-test matches
@@ -648,7 +649,7 @@ async function findProgramField(page, qid) {
         const isVisible = await element.isVisible().catch(() => false);
         const isEnabled = await element.isEnabled().catch(() => true);
         if (isVisible && isEnabled) {
-          console.log(`   ┣ Found field ${qid} using selector: ${selector}`);
+          logger.log(`   ┣ Found field ${qid} using selector: ${selector}`);
           return element;
         }
       }
@@ -659,7 +660,7 @@ async function findProgramField(page, qid) {
   return null;
 }
 
-async function fillTextField(page, field, value, question = null) {
+async function fillTextField(page, field, value, question = null, logger: ILogger) {
   try {
     const qid = question?.qid || 'unknown';
 
@@ -684,7 +685,7 @@ async function fillTextField(page, field, value, question = null) {
     }
 
     if (!target) {
-      console.log(`   ┗ ⚠️ No editable element found for ${qid}, skipping text fill.`);
+      logger.log(`   ┗ ⚠️ No editable element found for ${qid}, skipping text fill.`);
       return;
     }
 
@@ -700,7 +701,7 @@ async function fillTextField(page, field, value, question = null) {
         try { el.dispatchEvent(new InputEvent('input', { bubbles: true })); } catch (_) { }
         try { el.dispatchEvent(new Event('change', { bubbles: true })); } catch (_) { }
       }, String(value));
-      console.log(`   ┗ ✅ Filled WYSIWYG field: ${qid}`);
+      logger.log(`   ┗ ✅ Filled WYSIWYG field: ${qid}`);
       return;
     }
 
@@ -708,35 +709,35 @@ async function fillTextField(page, field, value, question = null) {
     await target.clear();
     await page.waitForTimeout(100);
     await target.fill(String(value));
-    console.log(`   ┗ ✅ Filled text field: ${qid}`);
+    logger.log(`   ┗ ✅ Filled text field: ${qid}`);
   } catch (error) {
-    console.log(`   ┗ ⚠️ Text fill failed: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Text fill failed: ${error.message}`);
     // Try alternative approach
     try {
       await field.click({ force: true, timeout: 5000 });
       await page.waitForTimeout(200);
       await field.press('Control+a');
       await page.keyboard.type(String(value));
-      console.log(`   ┗ ✅ Filled via keyboard typing`);
+      logger.log(`   ┗ ✅ Filled via keyboard typing`);
     } catch (_) { }
   }
 }
 
-async function fillSelectField(page, field, question = null) {
+async function fillSelectField(page, field, question = null, logger: ILogger) {
   const qid = question?.qid || 'unknown';
 
   const tag = await field.evaluate(node => node.tagName.toLowerCase()).catch(() => null);
   if (tag === 'select') {
     await field.selectOption({ index: 1 }).catch(() => { });
-    console.log(`   ┗ ✅ Selected option from native select: ${qid}`);
+    logger.log(`   ┗ ✅ Selected option from native select: ${qid}`);
     return;
   }
 
   // Delegate to multiselect handler for consistency
-  await fillMultiSelectField(page, field, question);
+  await fillMultiSelectField(page, field, question, logger);
 }
 
-async function fillMultiSelectField(page, field, question = null) {
+async function fillMultiSelectField(page, field, question = null, logger: ILogger) {
   const qid = question?.qid || 'unknown';
 
   try {
@@ -766,25 +767,25 @@ async function fillMultiSelectField(page, field, question = null) {
     }
 
     if (!wrapper || (await wrapper.count()) === 0) {
-      console.log(`   ┗ ⚠️ No multiselect wrapper found for ${qid}`);
+      logger.log(`   ┗ ⚠️ No multiselect wrapper found for ${qid}`);
       return;
     }
 
     // Check if multiselect is disabled
     const multiselectClass = await wrapper.getAttribute('class') || '';
     if (multiselectClass.includes('multiselect--disabled')) {
-      console.log(`   ┗ 🚫 Multiselect for ${qid} is disabled, skipping.`);
+      logger.log(`   ┗ 🚫 Multiselect for ${qid} is disabled, skipping.`);
       return;
     }
 
     // Check visibility
     const isVisible = await wrapper.isVisible().catch(() => false);
     if (!isVisible) {
-      console.log(`   ┗ 👁️ Multiselect for ${qid} not visible, skipping.`);
+      logger.log(`   ┗ 👁️ Multiselect for ${qid} not visible, skipping.`);
       return;
     }
 
-    console.log(`   ┣ 🔽 Opening multiselect dropdown for ${qid}...`);
+    logger.log(`   ┣ 🔽 Opening multiselect dropdown for ${qid}...`);
 
     // Click to open the multiselect
     await wrapper.click();
@@ -804,7 +805,7 @@ async function fillMultiSelectField(page, field, question = null) {
       const existingCount = await existingOptions.count();
 
       if (shouldType || existingCount === 0) {
-        console.log(`   ┣ Multiselect ${qid} requires typing to search (placeholder: "${placeholderText}")...`);
+        logger.log(`   ┣ Multiselect ${qid} requires typing to search (placeholder: "${placeholderText}")...`);
         // Try common letters/numbers to trigger options
         const searchTerms = ['a', 'c', 'e', 'm', 's', '1', '01', 'comp', 'bus', 'ed'];
         let found = false;
@@ -821,7 +822,7 @@ async function fillMultiSelectField(page, field, question = null) {
           const noResVisible = (await noResults.count()) > 0 && await noResults.first().isVisible().catch(() => false);
 
           if (realCount > 0 && !noResVisible) {
-            console.log(`   ┣ Found ${realCount} options with search term "${term}"`);
+            logger.log(`   ┣ Found ${realCount} options with search term "${term}"`);
             found = true;
             break;
           }
@@ -832,7 +833,7 @@ async function fillMultiSelectField(page, field, question = null) {
         }
 
         if (!found) {
-          console.log(`   ┗ 🚫 No options found for multiselect ${qid} after trying search terms.`);
+          logger.log(`   ┗ 🚫 No options found for multiselect ${qid} after trying search terms.`);
           await page.keyboard.press('Escape').catch(() => { });
           return;
         }
@@ -853,17 +854,17 @@ async function fillMultiSelectField(page, field, question = null) {
       const fallbackOptions = page.locator('.multiselect__content-wrapper li:not(.option--disabled)');
       candidateCount = await fallbackOptions.count();
       if (candidateCount > 0) {
-        console.log(`   ┣ Using fallback option selector, found ${candidateCount} options`);
+        logger.log(`   ┣ Using fallback option selector, found ${candidateCount} options`);
       }
     }
 
     if (candidateCount === 0) {
-      console.log(`   ┗ 🚫 No selectable options found for ${qid}`);
+      logger.log(`   ┗ 🚫 No selectable options found for ${qid}`);
       await page.keyboard.press('Escape').catch(() => { });
       return;
     }
 
-    console.log(`   ┣ Found ${candidateCount} candidate options for ${qid}`);
+    logger.log(`   ┣ Found ${candidateCount} candidate options for ${qid}`);
 
     // Try to select first visible, valid option
     let selected = false;
@@ -893,12 +894,12 @@ async function fillMultiSelectField(page, field, question = null) {
 
       try {
         await option.click({ timeout: 2000 });
-        console.log(`   ┗ ✅ Selected option for ${qid}: "${txt.trim().slice(0, 50)}${txt.trim().length > 50 ? '...' : ''}"`);
+        logger.log(`   ┗ ✅ Selected option for ${qid}: "${txt.trim().slice(0, 50)}${txt.trim().length > 50 ? '...' : ''}"`);
         selected = true;
       } catch (clickError) {
         try {
           await option.click({ force: true, timeout: 2000 });
-          console.log(`   ┗ ✅ Selected option (force) for ${qid}: "${txt.trim().slice(0, 30)}..."`);
+          logger.log(`   ┗ ✅ Selected option (force) for ${qid}: "${txt.trim().slice(0, 30)}..."`);
           selected = true;
         } catch (_) {
           continue;
@@ -907,7 +908,7 @@ async function fillMultiSelectField(page, field, question = null) {
     }
 
     if (!selected) {
-      console.log(`   ┗ 🚫 Could not select any option for ${qid}`);
+      logger.log(`   ┗ 🚫 Could not select any option for ${qid}`);
     }
 
     // Close dropdown if still open
@@ -915,12 +916,12 @@ async function fillMultiSelectField(page, field, question = null) {
     await page.waitForTimeout(300);
 
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling multiselect ${qid}: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling multiselect ${qid}: ${error.message}`);
     await page.keyboard.press('Escape').catch(() => { });
   }
 }
 
-async function fillYesNoField(page, field, question = null) {
+async function fillYesNoField(page, field, question = null, logger: ILogger) {
   const qid = question?.qid || 'unknown';
 
   try {
@@ -939,11 +940,11 @@ async function fillYesNoField(page, field, question = null) {
 
       if ((await altYes.count()) > 0) {
         await altYes.click();
-        console.log(`   ┗ ✅ Clicked Yes button for ${qid}`);
+        logger.log(`   ┗ ✅ Clicked Yes button for ${qid}`);
         return;
       }
 
-      console.log(`   ┗ ⚠️ No Yes/No buttons found for ${qid}`);
+      logger.log(`   ┗ ⚠️ No Yes/No buttons found for ${qid}`);
       return;
     }
 
@@ -975,39 +976,39 @@ async function fillYesNoField(page, field, question = null) {
 
     if (isVisible && isEnabled) {
       await buttonToClick.click();
-      console.log(`   ┗ ✅ Clicked ${buttonName} button for ${qid}`);
+      logger.log(`   ┗ ✅ Clicked ${buttonName} button for ${qid}`);
     } else {
-      console.log(`   ┗ ⚠️ ${buttonName} button not clickable for ${qid}`);
+      logger.log(`   ┗ ⚠️ ${buttonName} button not clickable for ${qid}`);
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling Yes/No field ${qid}: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling Yes/No field ${qid}: ${error.message}`);
   }
 }
 
 /**
  * Handle effectiveStartDate field specifically for programs (set to today's date)
  */
-async function handleEffectiveStartDateForProgram(page, question) {
+async function handleEffectiveStartDateForProgram(page, question, logger: ILogger) {
   try {
-    console.log(`📅 Processing effectiveStartDate field for program...`);
+    logger.log(`📅 Processing effectiveStartDate field for program...`);
 
     // Find the effective start date field
-    const field = await findProgramField(page, 'effectiveStartDate');
+    const field = await findProgramField(page, 'effectiveStartDate', logger);
 
     if (!field) {
-      console.log(`   ┗ ⚠️ Could not find effectiveStartDate field`);
+      logger.log(`   ┗ ⚠️ Could not find effectiveStartDate field`);
       return;
     }
 
-    console.log(`   ┗ ✅ Found effectiveStartDate field`);
+    logger.log(`   ┗ ✅ Found effectiveStartDate field`);
 
     const todayFormatted = formatFriendlyDate();
 
-    console.log(`   ┣ Setting effectiveStartDate to today: ${todayFormatted}`);
+    logger.log(`   ┣ Setting effectiveStartDate to today: ${todayFormatted}`);
 
-    await fillDateField(page, field, todayFormatted);
+    await fillDateField(page, field, todayFormatted, logger);
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error in handleEffectiveStartDateForProgram: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error in handleEffectiveStartDateForProgram: ${error.message}`);
   }
 }
 
@@ -1025,9 +1026,9 @@ function formatFriendlyDate(date = new Date()) {
 /**
  * Fill a date field with the specified value
  */
-async function fillDateField(page, fieldElement, value) {
+async function fillDateField(page, fieldElement, value, logger: ILogger) {
   try {
-    console.log(`   ┣ 📅 Processing date field with value: ${value}`);
+    logger.log(`   ┣ 📅 Processing date field with value: ${value}`);
 
     // Try to find actual input element within the wrapper
     const inputSelectors = [
@@ -1045,7 +1046,7 @@ async function fillDateField(page, fieldElement, value) {
         const isEnabled = await input.isEnabled().catch(() => true);
         if (isVisible && isEnabled) {
           actualInput = input;
-          console.log(`   ┣ Found date input using selector: ${selector}`);
+          logger.log(`   ┣ Found date input using selector: ${selector}`);
           break;
         }
       }
@@ -1056,7 +1057,7 @@ async function fillDateField(page, fieldElement, value) {
       const parentInput = fieldElement.locator('..').locator('input').first();
       if (await parentInput.count() > 0) {
         actualInput = parentInput;
-        console.log(`   ┣ Found date input in parent element`);
+        logger.log(`   ┣ Found date input in parent element`);
       }
     }
 
@@ -1065,7 +1066,7 @@ async function fillDateField(page, fieldElement, value) {
       const tagName = await fieldElement.evaluate(el => el.tagName.toLowerCase()).catch(() => '');
       if (tagName === 'input') {
         actualInput = fieldElement;
-        console.log(`   ┣ Field element itself is the input`);
+        logger.log(`   ┣ Field element itself is the input`);
       }
     }
 
@@ -1075,33 +1076,33 @@ async function fillDateField(page, fieldElement, value) {
         await actualInput.fill(value);
         await page.waitForTimeout(500);
         await actualInput.press('Enter'); // Close any date picker
-        console.log(`   ┗ ✅ Successfully set date to ${value}`);
+        logger.log(`   ┗ ✅ Successfully set date to ${value}`);
       } catch (inputError) {
-        console.log(`   ┣ Input field fill failed, trying direct typing...`);
+        logger.log(`   ┣ Input field fill failed, trying direct typing...`);
         try {
           await actualInput.click();
           await actualInput.press('Control+a'); // Select all
           await page.keyboard.type(value);
           await actualInput.press('Enter');
-          console.log(`   ┗ ✅ Successfully typed date: ${value}`);
+          logger.log(`   ┗ ✅ Successfully typed date: ${value}`);
         } catch (typeError) {
-          console.log(`   ┗ ⚠️ Error typing date: ${typeError.message}`);
+          logger.log(`   ┗ ⚠️ Error typing date: ${typeError.message}`);
         }
       }
     } else {
-      console.log(`   ┣ No input field found, trying to interact with wrapper element...`);
+      logger.log(`   ┣ No input field found, trying to interact with wrapper element...`);
       try {
         await fieldElement.click();
         await page.waitForTimeout(500);
         await page.keyboard.type(value);
         await page.keyboard.press('Enter');
-        console.log(`   ┗ ✅ Typed date into wrapper element`);
+        logger.log(`   ┗ ✅ Typed date into wrapper element`);
       } catch (wrapperError) {
-        console.log(`   ┗ ⚠️ Error with wrapper element: ${wrapperError.message}`);
+        logger.log(`   ┗ ⚠️ Error with wrapper element: ${wrapperError.message}`);
       }
     }
   } catch (error) {
-    console.log(`   ┗ ⚠️ Error filling date field: ${error.message}`);
+    logger.log(`   ┗ ⚠️ Error filling date field: ${error.message}`);
   }
 }
 
@@ -1118,9 +1119,9 @@ function getConfiguredMaxLength(question) {
 /**
  * Submit the program proposal and handle any errors
  */
-async function submitProgram(page, subfolder, schoolId, browser = null) {
+async function submitProgram(page, subfolder, schoolId, browser = null, logger: ILogger) {
   try {
-    console.log('📤 Attempting to submit program proposal...');
+    logger.log('📤 Attempting to submit program proposal...');
 
     // Look for the Submit Proposal button
     const submitSelectors = [
@@ -1135,13 +1136,13 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
       const button = page.locator(selector).first();
       if (await button.count() > 0 && await button.isVisible()) {
         submitButton = button;
-        console.log(`✅ Found submit button with selector: ${selector}`);
+        logger.log(`✅ Found submit button with selector: ${selector}`);
         break;
       }
     }
 
     if (!submitButton) {
-      console.log('⚠️ No Submit Proposal button found - skipping submission');
+      logger.log('⚠️ No Submit Proposal button found - skipping submission');
       return false;
     }
 
@@ -1151,12 +1152,12 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
     const isDisabledByClass = buttonClass.includes('disabled');
 
     if (isDisabled || isDisabledByClass) {
-      console.log('❌ Submit Proposal button is disabled');
+      logger.log('❌ Submit Proposal button is disabled');
 
       // Check for form errors banner
       const formErrorsBanner = page.locator('#form-errors-summary');
       if ((await formErrorsBanner.count()) > 0 && await formErrorsBanner.first().isVisible()) {
-        console.log('❌ Form errors banner detected - Submit Proposal button disabled due to validation errors');
+        logger.log('❌ Form errors banner detected - Submit Proposal button disabled due to validation errors');
 
         // Take error screenshot
         if (subfolder && schoolId) {
@@ -1165,12 +1166,12 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
             path: errorScreenshotPath,
             fullPage: true
           });
-          console.log(`📸 Error screenshot saved: ${errorScreenshotPath}`);
+          logger.log(`📸 Error screenshot saved: ${errorScreenshotPath}`);
         }
 
         // Offer user takeover
         if (browser && schoolId) {
-          console.log('🖐️ Manual intervention required - form has validation errors');
+          logger.log('🖐️ Manual intervention required - form has validation errors');
           const userResponse = await waitForUserResponseWithTimeout(5);
           if (userResponse === 'yes') {
             const takeoverResult = await offerUserTakeover(
@@ -1185,7 +1186,7 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
               true
             );
             if (takeoverResult.success) {
-              console.log('✅ User intervention successful - program submitted manually');
+              logger.log('✅ User intervention successful - program submitted manually');
               return true;
             }
           }
@@ -1196,7 +1197,7 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
 
       // Disabled but no error banner - offer takeover anyway
       if (browser && schoolId) {
-        console.log('🖐️ Manual intervention required - Submit button disabled');
+        logger.log('🖐️ Manual intervention required - Submit button disabled');
         const userResponse = await waitForUserResponseWithTimeout(5);
         if (userResponse === 'yes') {
           const takeoverResult = await offerUserTakeover(
@@ -1211,7 +1212,7 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
             true
           );
           if (takeoverResult.success) {
-            console.log('✅ User intervention successful - program submitted manually');
+            logger.log('✅ User intervention successful - program submitted manually');
             return true;
           }
         }
@@ -1221,14 +1222,14 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
     }
 
     // Click the submit button
-    console.log('🖱️ Clicking Submit Proposal button...');
+    logger.log('🖱️ Clicking Submit Proposal button...');
     await submitButton.click();
     await page.waitForTimeout(1500);
 
     // Check for form errors banner after clicking
     const formErrorsBanner = page.locator('#form-errors-summary');
     if ((await formErrorsBanner.count()) > 0 && await formErrorsBanner.first().isVisible()) {
-      console.log('❌ Form errors banner appeared after clicking Submit Proposal');
+      logger.log('❌ Form errors banner appeared after clicking Submit Proposal');
 
       // Take error screenshot
       if (subfolder && schoolId) {
@@ -1237,12 +1238,12 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
           path: errorScreenshotPath,
           fullPage: true
         });
-        console.log(`📸 Error screenshot saved: ${errorScreenshotPath}`);
+        logger.log(`📸 Error screenshot saved: ${errorScreenshotPath}`);
       }
 
       // Offer user takeover
       if (browser && schoolId) {
-        console.log('🖐️ Manual intervention required - form has validation errors after submit attempt');
+        logger.log('🖐️ Manual intervention required - form has validation errors after submit attempt');
         const userResponse = await waitForUserResponseWithTimeout(5);
         if (userResponse === 'yes') {
           const takeoverResult = await offerUserTakeover(
@@ -1257,7 +1258,7 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
             true
           );
           if (takeoverResult.success) {
-            console.log('✅ User intervention successful - program submitted manually');
+            logger.log('✅ User intervention successful - program submitted manually');
             return true;
           }
         }
@@ -1272,27 +1273,27 @@ async function submitProgram(page, subfolder, schoolId, browser = null) {
     // Check for success indicators
     const successBanner = page.locator('[data-test="integrationSyncStatus"].alert-success, .alert-success');
     if ((await successBanner.count()) > 0 && await successBanner.first().isVisible()) {
-      console.log('✅ Success banner detected - program proposal submitted successfully');
+      logger.log('✅ Success banner detected - program proposal submitted successfully');
       return true;
     }
 
-    console.log('✅ Submit Proposal button clicked - assuming success');
+    logger.log('✅ Submit Proposal button clicked - assuming success');
     return true;
 
   } catch (error) {
-    console.error(`❌ Error in submitProgram: ${error.message}`);
+    logger.error(`❌ Error in submitProgram: ${error.message}`);
     return false;
   }
 }
 
-async function captureProgramScreenshot(page, message, outputPath) {
+async function captureProgramScreenshot(page, message, outputPath, logger: ILogger) {
   if (!outputPath) return;
   try {
-    console.log(`📸 ${message}`);
+    logger.log(`📸 ${message}`);
     await screenshotCourseForm(page, outputPath, 'form.auto-form');
-    console.log(`✅ Screenshot saved: ${outputPath}`);
+    logger.log(`✅ Screenshot saved: ${outputPath}`);
   } catch (error) {
-    console.log(`⚠️ Screenshot failed: ${error.message}`);
+    logger.log(`⚠️ Screenshot failed: ${error.message}`);
   }
 }
 
@@ -1319,7 +1320,7 @@ function generateProgramTestValue(questionType, qid) {
   }
 }
 
-function getLatestProgramTemplateFile(schoolId) {
+function getLatestProgramTemplateFile(schoolId, logger: ILogger) {
   try {
     const resourcesDir = path.join(__dirname, 'Resources');
     if (!fs.existsSync(resourcesDir)) return null;
@@ -1336,16 +1337,16 @@ function getLatestProgramTemplateFile(schoolId) {
     });
     return path.join(resourcesDir, programFiles[0]);
   } catch (error) {
-    console.error('❌ Error finding program template file:', error.message);
+    logger.error('❌ Error finding program template file:', error.message);
     return null;
   }
 }
 
-module.exports = {
+export {
   createProgram,
-  updateProgram,
   fillProgramTemplate,
   getLatestProgramTemplateFile,
-  submitProgram
+  submitProgram,
+  updateProgram
 };
 
