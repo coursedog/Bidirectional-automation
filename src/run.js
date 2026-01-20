@@ -163,7 +163,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     const videoName = `${schoolId}-${act}-debugging-run`;
     // 2) Browser & Context (with video recording)
     // Launch in headed mode for potential user takeover, but minimized initially
-    const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, false);
+    const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, isApi ? true : false);
     // 3) Seed cookies & localStorage
     await seedContext(ctx, baseDomain, email, schoolId);
     // 4) Sign in
