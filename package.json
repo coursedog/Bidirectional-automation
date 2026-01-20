@@ -10,6 +10,9 @@
     "install-browsers": "npx playwright install",
     "run": "ts-node main.js"
   },
+  "files": [
+    "dist"
+  ],
   "keywords": [
     "automation",
     "testing",
