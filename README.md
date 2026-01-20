@@ -31,16 +31,12 @@ This tool is actively evolving and may not work for every SIS. Validate results 
     - The tool attempts to auto-detect if a nightly merge is in progress and will safely exit with a message; please rerun after merges complete.
 - For Curriculum Management: You MUST create a new form named 'Propose New Course' that uses the same Course Template and that is linked to an auto-approval workflow.
 - For Peoplesoft schools whose `schoolId` contains `_peoplesoft`: Program create/update test cases are only available for these schools, and they require a `Propose New Program` form (users are prompted before the flow starts). The automation also fetches the `programTemplate` from the API and stresses split ownership, department, and subplan requirements needed by PeopleSoft.
-- Do not log in to Coursedog while the application is running.
-    - When the automation starts, it will log in to Coursedog with the provided user account and password. Logging into Coursedog in another browser will log your user off from the automation.
-         - After completing bi-directional testing, open the relevant merge reports.
-            - Open each affected entity (e.g., course, section, instructor) after the merge to:
-                - Take screenshots.
-                - Review and troubleshoot as needed.
+- When the automation starts, it will log in to Coursedog with the provided user account and password.
+  - After completing bi-directional testing, open the relevant merge reports.
+    - Open each affected entity (e.g., course, section, instructor) after the merge to:
+        - Take screenshots.
+        - Review and troubleshoot as needed.
         - Note: Only open the merge report URL after the application has finished running all tests (when applicable), to avoid being logged out of the app.
-    💡
-     Alternatively, you can create a second user using plus addressing. For example, register a new user like yourname+automation@yourdomain.com and assign them the SuperAdmin + Coursedog roles.
-     Once set up, you can log in to one account in each browser without running into session conflicts. Just be cautious—you’ll still need to pay close attention to which school/account you're working in to avoid mistakes.
 - (Optional) – If you need to control which sections/courses the application has access to, you might want to create saved views to achieve that.
     - Example where this can come in handy:
         - For Banner schools there are some specific requirements, such as:
