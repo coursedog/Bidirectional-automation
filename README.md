@@ -37,8 +37,6 @@ This tool is actively evolving and may not work for every SIS. Validate results 
         - Take screenshots.
         - Review and troubleshoot as needed.
         - Note: Only open the merge report URL after the application has finished running all tests (when applicable), to avoid being logged out of the app.
-     
- 
 - (Optional) – If you need to control which sections/courses the application has access to, you might want to create saved views to achieve that.
     - Example where this can come in handy:
         - For Banner schools there are some specific requirements, such as:
