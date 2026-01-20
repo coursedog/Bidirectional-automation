@@ -18,11 +18,7 @@ try {
  * @param {string} env - Environment ('prd' or 'stg')
  * @returns {Promise<void>}
  */
-async function fetchSectionTemplate(token, schoolId, env) {
-  const baseUrl = env === 'prd'
-    ? 'https://app.coursedog.com'
-    : 'https://staging.coursedog.com';
-
+async function fetchSectionTemplate(token, schoolId, env, baseUrl) {
   const url = `${baseUrl}/api/v2/${schoolId}/general/sectionTemplate`;
 
   const headers = {
@@ -83,11 +79,7 @@ async function fetchSectionTemplate(token, schoolId, env) {
  * @param {string} env - Environment ('prd' or 'stg')
  * @returns {Promise<void>}
  */
-async function fetchCourseTemplate(token, schoolId, env) {
-  const baseUrl = env === 'prd'
-    ? 'https://app.coursedog.com'
-    : 'https://staging.coursedog.com';
-
+async function fetchCourseTemplate(token, schoolId, env, baseUrl) {
   const url = `${baseUrl}/api/v1/${schoolId}/general/courseTemplate`;
 
   const headers = {
@@ -148,11 +140,7 @@ async function fetchCourseTemplate(token, schoolId, env) {
  * @param {string} env - Environment ('prd' or 'stg')
  * @returns {Promise<void>}
  */
-async function fetchProgramTemplate(token, schoolId, env) {
-  const baseUrl = env === 'prd'
-    ? 'https://app.coursedog.com'
-    : 'https://staging.coursedog.com';
-
+async function fetchProgramTemplate(token, schoolId, env, baseUrl) {
   const endpoints = [
     `${baseUrl}/api/v1/${schoolId}/general/programTemplate`,
     `${baseUrl}/api/v2/${schoolId}/general/programTemplate`
@@ -217,7 +205,7 @@ async function fetchProgramTemplate(token, schoolId, env) {
  * @param {string} schoolId - School ID
  * @returns {Promise<string>} Session token
  */
-async function getSchoolTemplate(env, schoolId) {
+async function getSchoolTemplate(credentials, env, schoolId) {
   const baseUrl = env === 'prd'
     ? 'https://app.coursedog.com'
     : 'https://staging.coursedog.com';
@@ -234,8 +222,8 @@ async function getSchoolTemplate(env, schoolId) {
   };
 
   const body = {
-    email: creds.email,
-    password: creds.password
+    email: creds.email ? creds.email : credentials.email,
+    password: creds.password ? creds.password : credentials.password,
   };
 
   const maxAttempts = 5;
@@ -248,10 +236,10 @@ async function getSchoolTemplate(env, schoolId) {
         const token = response.data.token;
 
         // Fetch both section and course templates after successful authentication
-        await fetchSectionTemplate(token, schoolId, env);
-        await fetchCourseTemplate(token, schoolId, env);
+        await fetchSectionTemplate(token, schoolId, env, baseUrl);
+        await fetchCourseTemplate(token, schoolId, env, baseUrl);
         if (schoolId.includes('_peoplesoft')) {
-          await fetchProgramTemplate(token, schoolId, env);
+          await fetchProgramTemplate(token, schoolId, env, baseUrl);
         }
 
         return token;

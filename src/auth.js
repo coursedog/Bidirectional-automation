@@ -6,18 +6,21 @@ function loginUrl(baseDomain, productSlug) {
   return `${baseUrl}/#/login?continue=${encodeURIComponent(`/${productSlug}`)}`;
 }
 
-async function signIn(page, email, password, productSlug, env) {
-  // Fallback to creds.json if email/password not provided
-  if (!email || !password) {
-    try {
-      const credsPath = path.join(__dirname, 'creds.json');
-      if (fs.existsSync(credsPath)) {
-        const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
-        email = email || creds.email;
-        password = password || creds.password;
-      }
-    } catch (_) { }
+async function signIn(page, email, password, productSlug, env, isApi) {
+  if (!isApi) {
+    // Fallback to creds.json if email/password not provided
+    if (!email || !password) {
+      try {
+        const credsPath = path.join(__dirname, 'creds.json');
+        if (fs.existsSync(credsPath)) {
+          const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+          email = email || creds.email;
+          password = password || creds.password;
+        }
+      } catch (_) { }
+    }
   }
+
   const domain = env === 'prd' ? 'app.coursedog.com' : 'staging.coursedog.com';
   const url = loginUrl(domain, productSlug);
 

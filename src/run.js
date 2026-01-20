@@ -51,7 +51,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
   return null;
 }
 
-async function run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName }) {
+async function run({ email, password, env, productSlug, schoolId, action, courseFormName, programFormName, isApi }) {
   const programOnlyActions = ['createProgram', 'updateProgram'];
   const actionProductSlug = programOnlyActions.includes(action) ? 'cm/programs' : productSlug;
 
@@ -62,7 +62,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
   // 1) Get API token
   console.log('\n🔐 Getting API token...');
-  const token = await getSchoolTemplate(env, schoolId);
+  const token = await getSchoolTemplate({ email, password }, env, schoolId);
   console.log('📋 Token:', token);
 
   // 2) Pre-flight checks
@@ -78,7 +78,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     const videoName = `${schoolId}-${act}-debugging-run`;
     // 2) Browser & Context (with video recording)
     // Launch in headed mode for potential user takeover, but minimized initially
-    const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, false);
+    const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, isApi ? true : false);
     // 3) Seed cookies & localStorage
     await seedContext(ctx, baseDomain, email, schoolId);
 
@@ -99,7 +99,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
 
     // 4) Sign in
     try {
-      await signIn(page, email, password, currentProductSlug, env);
+      await signIn(page, email, password, currentProductSlug, env, isApi);
     } catch (error) {
       console.error('\n❌', error.message);
       await browser.close();
@@ -163,7 +163,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
     const videoName = `${schoolId}-${act}-debugging-run`;
     // 2) Browser & Context (with video recording)
     // Launch in headed mode for potential user takeover, but minimized initially
-    const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, false);
+    const { browser, ctx, page, baseDomain } = await launch(env, debugVideoDir, videoName, isApi ? true : false);
     // 3) Seed cookies & localStorage
     await seedContext(ctx, baseDomain, email, schoolId);
     // 4) Sign in
@@ -178,7 +178,7 @@ async function run({ email, password, env, productSlug, schoolId, action, course
       desiredSlug = 'sm/section-dashboard';
     }
     try {
-      await signIn(page, email, password, desiredSlug, env);
+      await signIn(page, email, password, desiredSlug, env, isApi);
     } catch (error) {
       console.error('\n❌', error.message);
       await browser.close();
