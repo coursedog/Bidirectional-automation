@@ -1,4 +1,6 @@
 import run from './run';
+import ConsoleLogger from './services/ConsoleLogger';
+import type { ILogger } from './services/interfaces/ILogger';
 
 const { gatherInputs } = require('./input');
 
@@ -14,7 +16,12 @@ async function runCli() {
   }
 };
 
+export type {
+  ILogger
+};
+
 export {
+  ConsoleLogger,
   run,
   runCli
 };
