@@ -34,8 +34,8 @@ This tool is actively evolving and may not work for every SIS. Validate results 
 - When the automation starts, it will log in to Coursedog with the provided user account and password.
   - After completing bi-directional testing, open the relevant merge reports.
     - Open each affected entity (e.g., course, section, instructor) after the merge to:
-    - Take screenshots.
-    - Review and troubleshoot as needed.
+        - Take screenshots.
+        - Review and troubleshoot as needed.
         - Note: Only open the merge report URL after the application has finished running all tests (when applicable), to avoid being logged out of the app.
      
  
