@@ -64,17 +64,17 @@ function gatherInputs() {
       console.log('  2) Curriculum Management');
       console.log('  3) Both Products');
       let prodChoice = prompt('Enter number [1-3] (or b to go back): ').trim();
-      
+
       if (prodChoice.toLowerCase() === 'back' || prodChoice.toLowerCase() === 'b') {
         step = 'password';
         continue;
       }
-      
-      if (!['1','2','3'].includes(prodChoice)) {
+
+      if (!['1', '2', '3'].includes(prodChoice)) {
         console.log('  ↳ Invalid. Please enter 1, 2, or 3.');
         continue;
       }
-      
+
       if (prodChoice === '3') {
         // Both products - set default slug (will be ignored) and special flag
         inputs.productSlug = 'sm/section-dashboard'; // Default, will switch as needed
@@ -91,12 +91,12 @@ function gatherInputs() {
     } else if (step === 'schoolId') {
       const reuseHint = previous.schoolId ? `Press Enter to reuse: ${previous.schoolId}` : '';
       const schoolId = prompt(`\nEnter your school ID (${reuseHint} or b to go back): `);
-      
+
       if (schoolId.toLowerCase() === 'back' || schoolId.toLowerCase() === 'b') {
         step = 'product';
         continue;
       }
-      
+
       if (!schoolId.trim()) {
         if (previous.schoolId) {
           inputs.schoolId = previous.schoolId;
@@ -130,19 +130,19 @@ function gatherInputs() {
         console.log('  5) Create New Relationships');
         console.log('  6) Inactivate a Section');
         console.log('  7) All of the Above');
-        
+
         let actionChoice = prompt('Enter number [1-7] (or b to go back): ').trim();
-        
+
         if (actionChoice.toLowerCase() === 'back' || actionChoice.toLowerCase() === 'b') {
           step = 'schoolId';
           continue;
         }
-        
-        if (!['1','2','3','4','5','6','7'].includes(actionChoice)) {
+
+        if (!['1', '2', '3', '4', '5', '6', '7'].includes(actionChoice)) {
           console.log('  ↳ Invalid. Please enter 1, 2, 3, 4, 5, 6 or 7.');
           continue;
         }
-        
+
         if (actionChoice === '1') inputs.action = 'update';
         else if (actionChoice === '2') inputs.action = 'create';
         else if (actionChoice === '3') inputs.action = 'createNoMeetNoProf';
@@ -150,9 +150,9 @@ function gatherInputs() {
         else if (actionChoice === '5') inputs.action = 'createRelationships';
         else if (actionChoice === '6') inputs.action = 'inactivateSection';
         else if (actionChoice === '7') inputs.action = 'all';
-        
+
         break;
-        
+
       } else if (inputs.prodChoice === '2') {
         console.log('\nSelect Test Case:');
         console.log('  1) Update Course through Direct Edit');
@@ -166,20 +166,20 @@ function gatherInputs() {
         } else {
           console.log('  5) All of the Above');
         }
-        
-        const validChoices = ['1','2','3','4'].concat(isPeopleSoftSchool ? ['5','6','7'] : ['5']);
+
+        const validChoices = ['1', '2', '3', '4'].concat(isPeopleSoftSchool ? ['5', '6', '7'] : ['5']);
         let actionChoice = prompt(`Enter number [${validChoices.join('-')}] (or b to go back): `).trim();
-        
+
         if (actionChoice.toLowerCase() === 'back' || actionChoice.toLowerCase() === 'b') {
           step = 'schoolId';
           continue;
         }
-        
+
         if (!validChoices.includes(actionChoice)) {
           console.log(`  ↳ Invalid. Please enter one of: ${validChoices.join(', ')}.`);
           continue;
         }
-        
+
         if (actionChoice === '1') inputs.action = 'updateCourse';
         else if (actionChoice === '2') inputs.action = 'inactivateCourse';
         else if (actionChoice === '3') inputs.action = 'newCourseRevision';
@@ -187,14 +187,14 @@ function gatherInputs() {
         else if (isPeopleSoftSchool && actionChoice === '5') inputs.action = 'updateProgram';
         else if (isPeopleSoftSchool && actionChoice === '6') inputs.action = 'createProgram';
         else inputs.action = 'courseAll';
-        
+
         formPromptQueue = determineFormPromptQueue(inputs.action, inputs.prodChoice, isPeopleSoftSchool);
         currentFormPrompt = formPromptQueue.shift();
         if (currentFormPrompt) {
           step = 'formName';
           continue;
         }
-        
+
         break;
       }
 
@@ -211,7 +211,7 @@ function gatherInputs() {
       console.log('  1) Enter a custom form name');
       console.log(`  2) Press Enter to use default: "${defaultFormName}"`);
       console.log('  💡 Recommendation: Press Enter now to use default immediately');
-      
+
       try {
         const userInput = prompt('Form Name (or press Enter for default): ');
         if (userInput.toLowerCase() === 'back' || userInput.toLowerCase() === 'b') {
@@ -262,12 +262,12 @@ function gatherInputs() {
     console.log('⚠️ Unable to save session data for reuse.');
   }
 
-  return { 
-    email: inputs.email, 
-    password: inputs.password, 
-    env: inputs.env, 
-    productSlug: inputs.productSlug, 
-    schoolId: inputs.schoolId, 
+  return {
+    email: inputs.email,
+    password: inputs.password,
+    env: inputs.env,
+    productSlug: inputs.productSlug,
+    schoolId: inputs.schoolId,
     action: inputs.action,
     courseFormName,
     programFormName
