@@ -146,6 +146,8 @@ src/debug-videos/**
 # Resources exports/templates: ignore contents; keep folder with .gitkeep if needed
 src/Resources/**
 !src/Resources/.gitkeep
+!src/Resources/entryFiles/
+!src/Resources/entryFiles/.gitkeep
 
 # Per-school run artifacts centralized under src/schools
 src/schools/**

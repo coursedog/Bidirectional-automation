@@ -266,6 +266,7 @@ function gatherInputs() {
     email: inputs.email, 
     password: inputs.password, 
     env: inputs.env, 
+    prodChoice: inputs.prodChoice,
     productSlug: inputs.productSlug, 
     schoolId: inputs.schoolId, 
     action: inputs.action,
