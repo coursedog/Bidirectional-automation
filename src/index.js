@@ -15,6 +15,7 @@ const { createProgram, updateProgram } = require('./programTemplateFill');
 const { startMergeReportPolling } = require('./mergeReportPoller');
 const { appendRunSummary, generateRunId } = require('./runSummary');
 const { performPreflightChecks } = require('./preflightChecks');
+const { runSkipFieldWorkflow } = require('./skipFieldSelector');
 //const { runComputerUseAgent } = require('./agent');
 
 // Session-based course tracking system
@@ -58,7 +59,7 @@ function getFormNameForAction(action, courseFormName, programFormName) {
 ;(async () => {
   try {
     // 0) Inputs
-    const { email, password, env, productSlug, schoolId, action, courseFormName, programFormName } = gatherInputs();
+    const { email, password, env, prodChoice, productSlug, schoolId, action, courseFormName, programFormName } = gatherInputs();
     const programOnlyActions = ['createProgram', 'updateProgram'];
     const actionProductSlug = programOnlyActions.includes(action) ? 'cm/programs' : productSlug;
 
@@ -71,6 +72,9 @@ function getFormNameForAction(action, courseFormName, programFormName) {
     console.log('\n🔐 Getting API token...');
     const token = await getSchoolTemplate(env, schoolId);
     console.log('📋 Token:', token);
+
+    // 1.5) Optional custom skip-field workflow
+    global.__customSkipFields = await runSkipFieldWorkflow(schoolId, prodChoice);
 
     // 2) Pre-flight checks
     try {

@@ -299,6 +299,16 @@ async function fillBaselineTemplate(page, schoolId, action, outputDir = null, br
     }
   }
 
+  // Merge user-defined local skip fields (if provided via entry file workflow)
+  const customSectionSkips = global.__customSkipFields && Array.isArray(global.__customSkipFields.sections)
+    ? global.__customSkipFields.sections
+    : [];
+  for (const qid of customSectionSkips) {
+    if (!skipFields.includes(qid)) {
+      skipFields.push(qid);
+    }
+  }
+
   // Extract all questionIds
   const questionIds = Object.keys(sectionTemplate.questions || {});
 
@@ -1266,6 +1276,12 @@ async function preFillRequiredEmptySectionFields(page) {
       'sisId',
       'allowIntegration'
     ]);
+    const customSectionSkips = global.__customSkipFields && Array.isArray(global.__customSkipFields.sections)
+      ? global.__customSkipFields.sections
+      : [];
+    for (const qid of customSectionSkips) {
+      protectedQids.add(qid);
+    }
 
     const getFirstUsable = async (base) => {
       for (const sel of base) {

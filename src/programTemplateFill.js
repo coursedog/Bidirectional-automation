@@ -384,6 +384,14 @@ async function fillProgramTemplate(page, schoolId, action = 'createProgram') {
       'departmentOwnership', 'effectiveEndDate', 'sisId', 'allowIntegration',
       'status', 'programCode' // programCode is like courseNumber - shouldn't auto-fill
     ];
+    const customProgramSkips = global.__customSkipFields && Array.isArray(global.__customSkipFields.programs)
+      ? global.__customSkipFields.programs
+      : [];
+    for (const qid of customProgramSkips) {
+      if (!skipFields.includes(qid)) {
+        skipFields.push(qid);
+      }
+    }
     
     const processed = new Set();
     let processedCount = 0;

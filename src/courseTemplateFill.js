@@ -1104,6 +1104,14 @@ async function fillCourseTemplate(page, schoolId, action = 'updateCourse') {
       } else {
         initialSkip = [];
       }
+      const customCourseSkips = global.__customSkipFields && Array.isArray(global.__customSkipFields.coursesCm)
+        ? global.__customSkipFields.coursesCm
+        : [];
+      for (const qid of customCourseSkips) {
+        if (!initialSkip.includes(qid)) {
+          initialSkip.push(qid);
+        }
+      }
       global.__courseDiffSkipFields = initialSkip;
       const maxPageErrors = 3; // Stop after 3 page errors to prevent endless loops
       
@@ -1418,6 +1426,14 @@ async function fillCourseField(page, question, action = 'updateCourse') {
     
     // Skip certain fields that shouldn't be modified
     const skipFields = ['effectiveStartDate', 'effectiveEndDate', 'crsApprovalDate', 'crsStatusDate', 'subjectCode', 'courseNumber', 'crsApprovalAgencyIds', 'status', 'sisId', 'allowIntegration', 'firstAvailable', 'studentEligibilityReference', 'studentEligibilityRule', 'crossListedCourses'];
+    const customCourseSkips = global.__customSkipFields && Array.isArray(global.__customSkipFields.coursesCm)
+      ? global.__customSkipFields.coursesCm
+      : [];
+    for (const qid of customCourseSkips) {
+      if (!skipFields.includes(qid)) {
+        skipFields.push(qid);
+      }
+    }
     
     // For inactivation, allow status and effectiveEndDate to be modified
     const isInactivationField = action === 'inactivateCourse' && (question.qid === 'status' || question.qid === 'effectiveEndDate');
@@ -3441,6 +3457,12 @@ async function preFillRequiredEmptyFields(page) {
       'crsApprovalAgencyIds',
       'allowIntegration'
     ]);
+    const customCourseSkips = global.__customSkipFields && Array.isArray(global.__customSkipFields.coursesCm)
+      ? global.__customSkipFields.coursesCm
+      : [];
+    for (const qid of customCourseSkips) {
+      protectedQids.add(qid);
+    }
 
     // Helper to get first visible & enabled element from a list of selectors
     const getFirstUsable = async (base) => {
